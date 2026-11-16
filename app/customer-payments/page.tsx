@@ -18,12 +18,13 @@ export default function CustomerPaymentsModule() {
   const [paymentMode, setPaymentMode] = useState('Bank Transfer (NEFT/RTGS)');
   const [receiptNo, setReceiptNo] = useState('UEPL/REC/26-27/402');
   
+  // Unique Verification Code generated automatically
+  const [uniqueCode] = useState(`UEPL-SEC-TXN-${Math.floor(100000 + Math.random() * 900000)}`);
+  
   const [isSaving, setIsSaving] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
 
-  // Printable Component Ref
   const receiptRef = useRef<HTMLDivElement>(null);
-
   const handlePrint = useReactToPrint({
     contentRef: receiptRef,
     documentTitle: `Receipt_${receiptNo}`,
@@ -33,6 +34,7 @@ export default function CustomerPaymentsModule() {
     setIsSaving(true);
     const receiptData = {
       receipt_no: receiptNo,
+      unique_code: uniqueCode,
       customer_name: customerName,
       unit_no: unitNo,
       milestone: milestone,
@@ -45,7 +47,7 @@ export default function CustomerPaymentsModule() {
       if (supabase) {
         await supabase.from('customer_payments').insert([receiptData]);
       }
-      setSuccessMsg(`Receipt ${receiptNo} generated and saved successfully!`);
+      setSuccessMsg(`Receipt ${receiptNo} with Unique Code ${uniqueCode} saved successfully!`);
     } catch (err) {
       console.error(err);
     } finally {
@@ -73,7 +75,12 @@ export default function CustomerPaymentsModule() {
 
       {/* Input Form Controls */}
       <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-xl border border-slate-200 p-8 mb-8">
-        <h3 className="text-lg font-black text-slate-900 mb-4 pb-2 border-b">Configure Receipt Details</h3>
+        <div className="flex justify-between items-center mb-4 pb-2 border-b">
+          <h3 className="text-lg font-black text-slate-900">Configure Receipt Details</h3>
+          <span className="bg-blue-50 text-blue-900 px-3 py-1 rounded-lg text-xs font-mono font-bold border border-blue-200">
+            Unique Code: {uniqueCode}
+          </span>
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
           <div>
             <label className="block text-xs font-bold text-slate-600 uppercase mb-2">Customer Name</label>
@@ -102,7 +109,7 @@ export default function CustomerPaymentsModule() {
         </div>
       </div>
 
-      {/* Printable Official Receipt Template */}
+      {/* Printable Official Receipt Template with Unique Code */}
       <div className="max-w-4xl mx-auto bg-white p-10 rounded-2xl shadow-xl border border-slate-300" ref={receiptRef}>
         <div className="border-b-2 border-slate-900 pb-6 mb-6 flex justify-between items-start">
           <div>
@@ -114,6 +121,17 @@ export default function CustomerPaymentsModule() {
             <span className="bg-slate-900 text-white px-4 py-1.5 rounded text-xs font-mono font-bold">RECEIPT</span>
             <p className="text-sm font-black text-slate-900 mt-2">{receiptNo}</p>
             <p className="text-xs text-slate-500">Date: {new Date().toLocaleDateString()}</p>
+          </div>
+        </div>
+
+        {/* Unique Verification Code Badge inside Receipt */}
+        <div className="bg-slate-900 text-white p-4 rounded-xl mb-6 flex justify-between items-center">
+          <div>
+            <p className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">Secure ERP Verification Identifier</p>
+            <p className="text-base font-mono font-black text-emerald-400 tracking-wider mt-0.5">{uniqueCode}</p>
+          </div>
+          <div className="text-right">
+            <span className="text-xs font-bold bg-emerald-600 text-white px-3 py-1 rounded">Verified Transaction</span>
           </div>
         </div>
 
@@ -147,8 +165,9 @@ export default function CustomerPaymentsModule() {
           </div>
         </div>
 
-        <div className="text-center text-[10px] text-slate-400 border-t pt-4">
-          This is a computer-generated official receipt for Universal Engicon Pvt. Ltd. ERP System.
+        <div className="flex justify-between items-center text-[10px] text-slate-400 border-t pt-4">
+          <span>Unique Hash ID: {uniqueCode}</span>
+          <span>Computer-generated official receipt for Universal Engicon Pvt. Ltd. ERP System.</span>
         </div>
       </div>
 
