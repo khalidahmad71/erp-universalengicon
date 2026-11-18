@@ -1,662 +1,563 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { supabase } from '@/lib/supabase';
-import { 
-  HardHat, ArrowLeft, Ruler, FileSpreadsheet, AlertTriangle, 
-  Plus, Send, ShieldCheck 
+import { createClient } from '@supabase/supabase-js';
+import {
+  Receipt,
+  Plus,
+  CheckCircle2,
+  ShieldAlert,
+  Lock,
+  Unlock,
+  FileCheck2,
+  Calculator,
 } from 'lucide-react';
 
-interface Project {
-  id: number;
-  name: string;
-}
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
-interface WorkOrder {
-  id: number;
-  wo_number: string;
-  project_id: number;
+interface ContractorMBBill {
+  id: string;
+  ra_bill_number: string;
+  bill_date: string;
+  project_id: string;
   contractor_name: string;
-  wbs_code: string;
+  contractor_pan: string;
   work_description: string;
   unit: string;
-  sanctioned_qty: number;
-  executed_qty: number;
-  wo_rate: number;
+  boq_rate: number;
+  previous_qty: number;
+  current_qty: number;
+  cumulative_qty: number;
+  gross_current_amount: number;
   retention_percent: number;
+  retention_amount: number;
   tds_percent: number;
+  tds_amount: number;
+  gst_percent: number;
+  gst_amount: number;
+  net_payable_amount: number;
+  approval_status: 'PENDING_QC' | 'CERTIFIED_BY_QS' | 'APPROVED_FOR_PAY' | 'PAID';
+  retention_released: boolean;
+  projects?: { name: string };
 }
 
-interface UnrecoveredMaterial {
-  id: number;
-  issue_slip_no: string;
-  material_name: string;
-  issued_qty: number;
-  unit: string;
-  recovery_amount: number;
-}
-
-interface ContractorBill {
-  id: number;
-  ra_bill_number: string;
-  contractor_name: string;
-  mb_number: string;
-  current_billed_qty: number;
-  gross_amount: number;
-  retention_deduction: number;
-  tds_deduction: number;
-  material_recovery_deduction: number;
-  net_payable: number;
-  approval_status: string;
-  enterprise_work_orders?: { wo_number: string; unit: string };
-}
-
-export default function EnterpriseContractorMB() {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
-  const [activeTab, setActiveTab] = useState<'BILLING' | 'WO'>('BILLING');
-
-  const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
-  const [bills, setBills] = useState<ContractorBill[]>([]);
-  const [pendingRecoveries, setPendingRecoveries] = useState<UnrecoveredMaterial[]>([]);
+export default function ContractorBillingPage() {
+  const [bills, setBills] = useState<ContractorMBBill[]>([]);
+  const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showModal, setShowModal] = useState(false);
 
-  // New Work Order Form States
-  const [woContractor, setWoContractor] = useState('');
-  const [woWbs, setWoWbs] = useState('WBS-2.0');
-  const [woDesc, setWoDesc] = useState('');
-  const [woUnit, setWoUnit] = useState('Cum');
-  const [woQty, setWoQty] = useState('');
-  const [woRate, setWoRate] = useState('');
-  const [woRetention, setWoRetention] = useState('5');
-  const [woTds, setWoTds] = useState('1');
-  const [savingWo, setSavingWo] = useState(false);
+  const [formData, setFormData] = useState({
+    ra_bill_number: '',
+    project_id: '',
+    contractor_name: '',
+    contractor_pan: '',
+    work_description: '',
+    unit: 'SQFT',
+    boq_rate: 0,
+    previous_qty: 0,
+    current_qty: 0,
+    retention_percent: 5,
+    tds_percent: 2,
+    gst_percent: 18,
+  });
 
-  // Digital MB & RA Bill Form States
-  const [selectedWoId, setSelectedWoId] = useState<number | null>(null);
-  const [mbNumber, setMbNumber] = useState('MB-01 / Pg-14');
-  const [dimNos, setDimNos] = useState('1');
-  const [dimL, setDimL] = useState('');
-  const [dimB, setDimB] = useState('');
-  const [dimH, setDimH] = useState('');
-  const [submittingBill, setSubmittingBill] = useState(false);
-
-  useEffect(() => {
-    fetchProjects();
-  }, []);
-
-  useEffect(() => {
-    if (selectedProjectId) {
-      loadModuleData(selectedProjectId);
-    }
-  }, [selectedProjectId]);
-
-  const activeWO = workOrders.find((w) => w.id === selectedWoId);
-
-  // Auto-fetch unrecovered chargeable store issues for the selected contractor
-  useEffect(() => {
-    if (selectedProjectId && activeWO) {
-      fetchContractorStoreRecoveries(selectedProjectId, activeWO.contractor_name);
-    } else {
-      setPendingRecoveries([]);
-    }
-  }, [selectedWoId, selectedProjectId]);
-
-  async function fetchProjects() {
-    const { data } = await supabase.from('projects').select('id, name').order('id');
-    if (data && data.length > 0) {
-      setProjects(data);
-      setSelectedProjectId(data[0].id);
-    } else {
-      setLoading(false);
-    }
-  }
-
-  async function loadModuleData(projectId: number) {
+  const fetchData = async () => {
     setLoading(true);
-    const [woRes, billRes] = await Promise.all([
-      supabase.from('enterprise_work_orders').select('*').eq('project_id', projectId).order('id', { ascending: false }),
-      supabase.from('enterprise_contractor_bills').select('*, enterprise_work_orders(wo_number, unit)').eq('project_id', projectId).order('id', { ascending: false })
+    const [billsRes, projRes] = await Promise.all([
+      supabase
+        .from('contractor_mb_bills')
+        .select('*, projects(name)')
+        .order('created_at', { ascending: false }),
+      supabase.from('projects').select('id, name'),
     ]);
 
-    if (woRes.data) {
-      setWorkOrders(woRes.data);
-      setSelectedWoId(woRes.data.length > 0 ? woRes.data[0].id : null);
-    }
-    if (billRes.data) {
-      setBills(billRes.data);
-    }
+    if (billsRes.data) setBills(billsRes.data as ContractorMBBill[]);
+    if (projRes.data) setProjects(projRes.data);
     setLoading(false);
-  }
+  };
 
-  async function fetchContractorStoreRecoveries(projectId: number, contractorName: string) {
-    const { data } = await supabase
-      .from('enterprise_material_issues')
-      .select('id, issue_slip_no, material_name, issued_qty, unit, recovery_amount')
-      .eq('project_id', projectId)
-      .eq('issue_type', 'CHARGEABLE_RECOVERY')
-      .eq('is_recovered_in_bill', false)
-      .ilike('issued_to_contractor', `%${contractorName.trim()}%`);
+  useEffect(() => {
+    fetchData();
+  }, []);
 
-    setPendingRecoveries(data || []);
-  }
+  // Live Preview Calculations in Modal
+  const liveGross = Number(formData.current_qty) * Number(formData.boq_rate);
+  const liveRetention = (liveGross * Number(formData.retention_percent)) / 100;
+  const liveTds = (liveGross * Number(formData.tds_percent)) / 100;
+  const liveGst = (liveGross * Number(formData.gst_percent)) / 100;
+  const liveNetPayable = liveGross + liveGst - liveRetention - liveTds;
 
-  async function handleCreateWorkOrder(e: React.FormEvent) {
+  const handleCreateBill = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedProjectId || !woContractor || !woDesc || !woQty || !woRate) return;
-
-    setSavingWo(true);
-    const woNumber = `UEPL/WO/26-27/${String(workOrders.length + 201).padStart(4, '0')}`;
-
-    const { error } = await supabase.from('enterprise_work_orders').insert({
-      wo_number: woNumber,
-      project_id: selectedProjectId,
-      contractor_name: woContractor.trim(),
-      wbs_code: woWbs,
-      work_description: woDesc,
-      unit: woUnit,
-      sanctioned_qty: Number(woQty),
-      executed_qty: 0,
-      wo_rate: Number(woRate),
-      retention_percent: Number(woRetention),
-      tds_percent: Number(woTds)
-    });
+    const { error } = await supabase.from('contractor_mb_bills').insert([
+      {
+        ra_bill_number: formData.ra_bill_number,
+        project_id: formData.project_id || null,
+        contractor_name: formData.contractor_name,
+        contractor_pan: formData.contractor_pan.toUpperCase(),
+        work_description: formData.work_description,
+        unit: formData.unit,
+        boq_rate: Number(formData.boq_rate),
+        previous_qty: Number(formData.previous_qty),
+        current_qty: Number(formData.current_qty),
+        retention_percent: Number(formData.retention_percent),
+        tds_percent: Number(formData.tds_percent),
+        gst_percent: Number(formData.gst_percent),
+      },
+    ]);
 
     if (!error) {
-      setWoContractor('');
-      setWoDesc('');
-      setWoQty('');
-      setWoRate('');
-      await loadModuleData(selectedProjectId);
-      setActiveTab('BILLING');
-    } else {
-      alert('Work Order Error: ' + error.message);
-    }
-    setSavingWo(false);
-  }
-
-  // Digital MB Calculation (Nos x L x B x H)
-  const nNos = Number(dimNos) || 1;
-  const nL = Number(dimL) || 0;
-  const nB = Number(dimB) || 1;
-  const nH = Number(dimH) || 1;
-  const calculatedMbQty = nL > 0 ? Number((nNos * nL * nB * nH).toFixed(3)) : 0;
-
-  const balanceWoQty = activeWO ? Math.max(0, Number(activeWO.sanctioned_qty) - Number(activeWO.executed_qty || 0)) : 0;
-  const isOverWoLimit = activeWO ? calculatedMbQty > balanceWoQty : false;
-
-  // Financial Waterfall Calculation
-  const grossBillAmount = activeWO ? calculatedMbQty * Number(activeWO.wo_rate) : 0;
-  const retentionAmt = activeWO ? (grossBillAmount * Number(activeWO.retention_percent)) / 100 : 0;
-  const tdsAmt = activeWO ? (grossBillAmount * Number(activeWO.tds_percent)) / 100 : 0;
-  const storeRecoveryAmt = pendingRecoveries.reduce((sum, r) => sum + Number(r.recovery_amount || 0), 0);
-  const netPayableAmount = Math.max(0, grossBillAmount - retentionAmt - tdsAmt - storeRecoveryAmt);
-
-  async function handleSubmitRABill(e: React.FormEvent) {
-    e.preventDefault();
-    if (!selectedProjectId || !activeWO || calculatedMbQty <= 0) return;
-
-    if (isOverWoLimit) {
-      alert(`MB BLOCKED: Measured Qty (${calculatedMbQty}) exceeds remaining Work Order balance (${balanceWoQty} ${activeWO.unit})!`);
-      return;
-    }
-
-    setSubmittingBill(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    const raBillNumber = `UEPL/RA/26-27/${String(bills.length + 301).padStart(4, '0')}`;
-    const dimFormula = `${nNos} Nos x ${nL}m x ${nB}m x ${nH}m`;
-
-    // 1. Insert Contractor RA Bill
-    const { data: insertedBill, error } = await supabase
-      .from('enterprise_contractor_bills')
-      .insert({
-        ra_bill_number: raBillNumber,
-        project_id: selectedProjectId,
-        wo_id: activeWO.id,
-        contractor_name: activeWO.contractor_name,
-        mb_number: mbNumber,
-        measurement_details: dimFormula,
-        current_billed_qty: calculatedMbQty,
-        wo_rate: activeWO.wo_rate,
-        gross_amount: grossBillAmount,
-        retention_deduction: retentionAmt,
-        tds_deduction: tdsAmt,
-        material_recovery_deduction: storeRecoveryAmt,
-        net_payable: netPayableAmount,
-        approval_status: 'PENDING_APPROVER'
-      })
-      .select()
-      .single();
-
-    if (!error && insertedBill) {
-      // 2. Update Executed Qty in Work Order
-      await supabase
-        .from('enterprise_work_orders')
-        .update({ executed_qty: Number(activeWO.executed_qty || 0) + calculatedMbQty })
-        .eq('id', activeWO.id);
-
-      // 3. Mark Store Chargeable Slips as Recovered (Prevents double recovery!)
-      if (pendingRecoveries.length > 0) {
-        const slipIds = pendingRecoveries.map((r) => r.id);
-        await supabase
-          .from('enterprise_material_issues')
-          .update({ is_recovered_in_bill: true })
-          .in('id', slipIds);
-      }
-
-      // 4. Push Net Payable to MD Executive Approval Desk (Module 1)
-      await supabase.from('approval_requests').insert({
-        project_id: selectedProjectId,
-        module_name: 'CONTRACTOR_RA_BILL',
-        document_number: `${raBillNumber} (${activeWO.contractor_name})`,
-        reference_table: 'enterprise_contractor_bills',
-        reference_id: String(insertedBill.id),
-        amount: netPayableAmount,
-        budget_variance_pct: 0,
-        current_status: 'PENDING_APPROVER',
-        requested_by: user?.id
+      setShowModal(false);
+      setFormData({
+        ra_bill_number: '',
+        project_id: '',
+        contractor_name: '',
+        contractor_pan: '',
+        work_description: '',
+        unit: 'SQFT',
+        boq_rate: 0,
+        previous_qty: 0,
+        current_qty: 0,
+        retention_percent: 5,
+        tds_percent: 2,
+        gst_percent: 18,
       });
-
-      // 5. Audit Trail
-      await supabase.from('enterprise_audit_logs').insert({
-        user_id: user?.id,
-        user_email: user?.email || 'billing@universalengicon.com',
-        module_name: 'CONTRACTOR_RA_BILLING',
-        action_type: 'SUBMIT_RA_BILL',
-        document_number: raBillNumber,
-        new_values: { gross: grossBillAmount, recovery: storeRecoveryAmt, net: netPayableAmount }
-      });
-
-      setDimL('');
-      await loadModuleData(selectedProjectId);
+      fetchData();
     } else {
-      alert('RA Bill Error: ' + (error?.message || 'Unknown error'));
+      alert('Error saving RA Bill: ' + error.message);
     }
-    setSubmittingBill(false);
-  }
+  };
 
-  const formatINR = (val: number) =>
-    new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(val);
+  const updateStatus = async (id: string, nextStatus: ContractorMBBill['approval_status']) => {
+    await supabase.from('contractor_mb_bills').update({ approval_status: nextStatus }).eq('id', id);
+    fetchData();
+  };
+
+  const toggleRetentionRelease = async (id: string, currentState: boolean) => {
+    await supabase
+      .from('contractor_mb_bills')
+      .update({ retention_released: !currentState })
+      .eq('id', id);
+    fetchData();
+  };
+
+  // Executive KPIs
+  const totalGrossCertified = bills.reduce((sum, b) => sum + Number(b.gross_current_amount || 0), 0);
+  const totalRetentionHeld = bills
+    .filter((b) => !b.retention_released)
+    .reduce((sum, b) => sum + Number(b.retention_amount || 0), 0);
+  const totalTdsDeducted = bills.reduce((sum, b) => sum + Number(b.tds_amount || 0), 0);
+  const totalNetPayable = bills
+    .filter((b) => b.approval_status !== 'PAID')
+    .reduce((sum, b) => sum + Number(b.net_payable_amount || 0), 0);
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 p-6 space-y-6">
+    <div className="min-h-screen bg-slate-50 p-6 text-slate-900">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between border-b border-slate-200 pb-4 gap-4">
+      <div className="mb-6 flex flex-col justify-between gap-4 border-b border-slate-200 pb-5 md:flex-row md:items-center">
         <div>
-          <Link href="/" className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:underline mb-1">
-            <ArrowLeft className="w-3.5 h-3.5" /> Back to MD Command Center
-          </Link>
-          <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-            <HardHat className="w-6 h-6 text-amber-600" /> Sub-Contractor Digital MB & Auto-Recovery RA Billing
+          <span className="text-xs font-bold tracking-wider text-blue-700 uppercase">
+            Universal Engicon Pvt. Ltd. • Site QS &amp; Billing
+          </span>
+          <h1 className="text-2xl font-extrabold text-slate-900">
+            Contractor Measurement Book (MB) &amp; RA Billing
           </h1>
         </div>
+        <button
+          onClick={() => setShowModal(true)}
+          className="flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
+        >
+          <Plus className="h-4 w-4" /> New MB Entry &amp; RA Bill
+        </button>
+      </div>
 
-        <div className="flex items-center gap-3">
-          <label className="text-xs font-bold text-slate-500 uppercase">Project:</label>
-          <select
-            value={selectedProjectId || ''}
-            onChange={(e) => setSelectedProjectId(Number(e.target.value))}
-            className="bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-semibold text-slate-800"
-          >
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
+      {/* KPI Strip */}
+      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-4">
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <p className="text-xs font-medium text-slate-500">Gross Work Certified</p>
+          <p className="mt-1 text-2xl font-bold text-slate-900">
+            ₹ {totalGrossCertified.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+          </p>
+          <span className="text-xs text-slate-400">Cumulative MB Value (Excl. GST)</span>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <p className="text-xs font-medium text-slate-500">Retention Money Held</p>
+          <p className="mt-1 text-2xl font-bold text-amber-600">
+            ₹ {totalRetentionHeld.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+          </p>
+          <span className="text-xs text-slate-400">Defect Liability Security Deposit</span>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <p className="text-xs font-medium text-slate-500">Sec 194C TDS Deducted</p>
+          <p className="mt-1 text-2xl font-bold text-blue-700">
+            ₹ {totalTdsDeducted.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+          </p>
+          <span className="text-xs text-slate-400">1% Individual / 2% Company</span>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <p className="text-xs font-medium text-slate-500">Pending Net Disbursement</p>
+          <p className="mt-1 text-2xl font-bold text-emerald-700">
+            ₹ {totalNetPayable.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+          </p>
+          <span className="text-xs text-slate-400">After Retention, TDS &amp; +GST</span>
         </div>
       </div>
 
-      {/* Navigation Tabs */}
-      <div className="flex gap-2 border-b border-slate-200 pb-2">
-        <button
-          onClick={() => setActiveTab('BILLING')}
-          className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 ${
-            activeTab === 'BILLING' ? 'bg-slate-900 text-white' : 'bg-white text-slate-700 border border-slate-200'
-          }`}
-        >
-          <Ruler className="w-4 h-4 text-amber-400" /> 1. Digital Measurement Book (MB) & RA Bill
-        </button>
-        <button
-          onClick={() => setActiveTab('WO')}
-          className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 ${
-            activeTab === 'WO' ? 'bg-slate-900 text-white' : 'bg-white text-slate-700 border border-slate-200'
-          }`}
-        >
-          <FileSpreadsheet className="w-4 h-4 text-blue-400" /> 2. Issue Sub-Contractor Work Order ({workOrders.length})
-        </button>
-      </div>
+      {/* Main MB & RA Bill Ledger Table */}
+      {loading ? (
+        <div className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">
+          Loading Measurement Book records...
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-slate-100 text-[11px] font-bold text-slate-600 uppercase">
+              <tr>
+                <th className="px-4 py-3">RA Bill &amp; Contractor</th>
+                <th className="px-4 py-3">Project &amp; Work Item</th>
+                <th className="px-4 py-3 text-right">MB Qty (Prev + Curr = Cum)</th>
+                <th className="px-4 py-3 text-right">Gross Value (₹)</th>
+                <th className="px-4 py-3 text-right">Retention Held</th>
+                <th className="px-4 py-3 text-right">194C TDS</th>
+                <th className="px-4 py-3 text-right">GST (+)</th>
+                <th className="px-4 py-3 text-right">Net Payable (₹)</th>
+                <th className="px-4 py-3">QS / MD Approval</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200">
+              {bills.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="px-4 py-8 text-center text-slate-400">
+                    No contractor RA bills recorded yet. Click &quot;New MB Entry &amp; RA Bill&quot; to start.
+                  </td>
+                </tr>
+              ) : (
+                bills.map((bill) => (
+                  <tr key={bill.id} className="hover:bg-slate-50">
+                    <td className="px-4 py-3">
+                      <div className="font-bold text-slate-900">{bill.ra_bill_number}</div>
+                      <div className="text-xs font-medium text-slate-600">{bill.contractor_name}</div>
+                      {bill.contractor_pan && (
+                        <div className="font-mono text-[10px] text-slate-400">PAN: {bill.contractor_pan}</div>
+                      )}
+                    </td>
 
-      {/* TAB 1: DIGITAL MB & RA BILL GENERATOR */}
-      {activeTab === 'BILLING' && (
-        <div className="space-y-6">
-          <form onSubmit={handleSubmitRABill} className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-5">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <span className="font-bold text-sm text-slate-800">Record Site Measurements (MB) & Auto-Calculate RA Bill</span>
-              <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded">
-                <ShieldCheck className="w-3.5 h-3.5" /> Store Recovery & Retention Linked
-              </span>
+                    <td className="px-4 py-3">
+                      <div className="text-xs font-bold text-blue-700">{bill.projects?.name || 'General'}</div>
+                      <div className="text-xs text-slate-700">{bill.work_description}</div>
+                      <div className="text-[11px] text-slate-400">
+                        Rate: ₹{Number(bill.boq_rate).toLocaleString('en-IN')} / {bill.unit}
+                      </div>
+                    </td>
+
+                    <td className="px-4 py-3 text-right font-mono text-xs">
+                      <div>
+                        {Number(bill.previous_qty)} +{' '}
+                        <span className="font-bold text-blue-700">{Number(bill.current_qty)}</span>
+                      </div>
+                      <div className="font-bold text-slate-900">
+                        = {Number(bill.cumulative_qty)} {bill.unit}
+                      </div>
+                    </td>
+
+                    <td className="px-4 py-3 text-right font-mono font-semibold">
+                      ₹ {Number(bill.gross_current_amount).toLocaleString('en-IN')}
+                    </td>
+
+                    <td className="px-4 py-3 text-right">
+                      <div className="font-mono text-xs font-bold text-amber-700">
+                        - ₹ {Number(bill.retention_amount).toLocaleString('en-IN')} ({bill.retention_percent}%)
+                      </div>
+                      <button
+                        onClick={() => toggleRetentionRelease(bill.id, bill.retention_released)}
+                        className={`mt-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                          bill.retention_released
+                            ? 'bg-emerald-50 text-emerald-700'
+                            : 'bg-amber-50 text-amber-700'
+                        }`}
+                      >
+                        {bill.retention_released ? (
+                          <>
+                            <Unlock className="h-3 w-3" /> Released
+                          </>
+                        ) : (
+                          <>
+                            <Lock className="h-3 w-3" /> Release Retention
+                          </>
+                        )}
+                      </button>
+                    </td>
+
+                    <td className="px-4 py-3 text-right font-mono text-xs text-rose-600">
+                      - ₹ {Number(bill.tds_amount).toLocaleString('en-IN')}
+                      <div className="text-[10px] text-slate-400">({bill.tds_percent}%)</div>
+                    </td>
+
+                    <td className="px-4 py-3 text-right font-mono text-xs text-slate-600">
+                      + ₹ {Number(bill.gst_amount).toLocaleString('en-IN')}
+                      <div className="text-[10px] text-slate-400">({bill.gst_percent}%)</div>
+                    </td>
+
+                    <td className="px-4 py-3 text-right font-mono text-sm font-extrabold text-emerald-700">
+                      ₹ {Number(bill.net_payable_amount).toLocaleString('en-IN')}
+                    </td>
+
+                    <td className="px-4 py-3">
+                      {bill.approval_status === 'PENDING_QC' && (
+                        <button
+                          onClick={() => updateStatus(bill.id, 'CERTIFIED_BY_QS')}
+                          className="inline-flex items-center gap-1 rounded bg-amber-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-amber-700"
+                        >
+                          <FileCheck2 className="h-3.5 w-3.5" /> Certify MB
+                        </button>
+                      )}
+                      {bill.approval_status === 'CERTIFIED_BY_QS' && (
+                        <button
+                          onClick={() => updateStatus(bill.id, 'APPROVED_FOR_PAY')}
+                          className="inline-flex items-center gap-1 rounded bg-blue-700 px-2.5 py-1 text-xs font-semibold text-white hover:bg-blue-800"
+                        >
+                          <CheckCircle2 className="h-3.5 w-3.5" /> MD Approve
+                        </button>
+                      )}
+                      {bill.approval_status === 'APPROVED_FOR_PAY' && (
+                        <button
+                          onClick={() => updateStatus(bill.id, 'PAID')}
+                          className="inline-flex items-center gap-1 rounded bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-emerald-700"
+                        >
+                          Mark Paid
+                        </button>
+                      )}
+                      {bill.approval_status === 'PAID' && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
+                          <CheckCircle2 className="h-3.5 w-3.5" /> PAID
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Modal: Create MB & RA Bill */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <form
+            onSubmit={handleCreateBill}
+            className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl"
+          >
+            <div className="mb-4 flex items-center justify-between border-b pb-3">
+              <h2 className="flex items-center gap-2 text-lg font-bold text-slate-900">
+                <Receipt className="h-5 w-5 text-blue-700" /> Record Measurement Book (MB) &amp; RA Bill
+              </h2>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="md:col-span-2">
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Select Active Sub-Contractor Work Order*</label>
+            <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
+              <div>
+                <label className="mb-1 block font-semibold">RA Bill Number *</label>
+                <input
+                  required
+                  className="w-full rounded border p-2"
+                  placeholder="RA-BILL-01"
+                  value={formData.ra_bill_number}
+                  onChange={(e) => setFormData({ ...formData, ra_bill_number: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block font-semibold">Project / Site *</label>
                 <select
-                  value={selectedWoId || ''}
-                  onChange={(e) => setSelectedWoId(Number(e.target.value))}
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-medium"
+                  required
+                  className="w-full rounded border p-2"
+                  value={formData.project_id}
+                  onChange={(e) => setFormData({ ...formData, project_id: e.target.value })}
                 >
-                  {workOrders.length === 0 && <option value="">No Work Orders found (Create a Work Order in Tab 2 first)</option>}
-                  {workOrders.map((w) => (
-                    <option key={w.id} value={w.id}>
-                      {w.wo_number} • {w.contractor_name} — {w.work_description} (Bal: {Math.max(0, w.sanctioned_qty - (w.executed_qty || 0))} {w.unit})
+                  <option value="">-- Select Site --</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
                     </option>
                   ))}
                 </select>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">MB Book & Page Reference*</label>
+                <label className="mb-1 block font-semibold">Contractor Name *</label>
                 <input
-                  type="text"
                   required
-                  value={mbNumber}
-                  onChange={(e) => setMbNumber(e.target.value)}
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-semibold"
+                  className="w-full rounded border p-2"
+                  placeholder="Sub-Contractor / Agency Name"
+                  value={formData.contractor_name}
+                  onChange={(e) => setFormData({ ...formData, contractor_name: e.target.value })}
                 />
               </div>
+
+              <div>
+                <label className="mb-1 block font-semibold">Contractor PAN (for 194C TDS)</label>
+                <input
+                  className="w-full rounded border p-2 uppercase"
+                  placeholder="ABCDE1234F"
+                  maxLength={10}
+                  value={formData.contractor_pan}
+                  onChange={(e) => setFormData({ ...formData, contractor_pan: e.target.value })}
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="mb-1 block font-semibold">BOQ Work Description *</label>
+                <input
+                  required
+                  className="w-full rounded border p-2"
+                  placeholder="e.g. RCC M25 Slab Casting & Shuttering - 5th Floor"
+                  value={formData.work_description}
+                  onChange={(e) => setFormData({ ...formData, work_description: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block font-semibold">Measurement Unit</label>
+                <select
+                  className="w-full rounded border p-2"
+                  value={formData.unit}
+                  onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
+                >
+                  <option value="SQFT">SQFT</option>
+                  <option value="CUM">CUM (Cubic Meter)</option>
+                  <option value="SQM">SQM (Square Meter)</option>
+                  <option value="RMT">RMT (Running Meter)</option>
+                  <option value="MT">MT (Metric Ton)</option>
+                  <option value="NOS">NOS</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block font-semibold">Approved BOQ Rate (₹) *</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  className="w-full rounded border p-2 font-mono"
+                  value={formData.boq_rate}
+                  onChange={(e) => setFormData({ ...formData, boq_rate: Number(e.target.value) })}
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block font-semibold">Previous Certified Qty</label>
+                <input
+                  type="number"
+                  step="0.001"
+                  className="w-full rounded border bg-slate-50 p-2 font-mono"
+                  value={formData.previous_qty}
+                  onChange={(e) => setFormData({ ...formData, previous_qty: Number(e.target.value) })}
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block font-semibold text-blue-800">Current Bill Qty *</label>
+                <input
+                  type="number"
+                  step="0.001"
+                  required
+                  className="w-full rounded border-2 border-blue-600 p-2 font-mono font-bold"
+                  value={formData.current_qty}
+                  onChange={(e) => setFormData({ ...formData, current_qty: Number(e.target.value) })}
+                />
+              </div>
+
+              {/* Statutory & Retention Rules */}
+              <div>
+                <label className="mb-1 block font-semibold text-amber-800">Retention Money %</label>
+                <select
+                  className="w-full rounded border p-2"
+                  value={formData.retention_percent}
+                  onChange={(e) => setFormData({ ...formData, retention_percent: Number(e.target.value) })}
+                >
+                  <option value={5}>5% Standard Retention</option>
+                  <option value={10}>10% High-Risk / Structural Retention</option>
+                  <option value={0}>0% (No Retention)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block font-semibold text-rose-800">Sec 194C TDS %</label>
+                <select
+                  className="w-full rounded border p-2"
+                  value={formData.tds_percent}
+                  onChange={(e) => setFormData({ ...formData, tds_percent: Number(e.target.value) })}
+                >
+                  <option value={1}>1% (Individual / HUF Contractor)</option>
+                  <option value={2}>2% (Company / Firm Contractor)</option>
+                  <option value={0}>0% (Lower Deduction Cert.)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block font-semibold">GST Rate %</label>
+                <select
+                  className="w-full rounded border p-2"
+                  value={formData.gst_percent}
+                  onChange={(e) => setFormData({ ...formData, gst_percent: Number(e.target.value) })}
+                >
+                  <option value={18}>18% Works Contract GST</option>
+                  <option value={12}>12% Govt / Affordable Housing</option>
+                  <option value={0}>0% (Unregistered / Exempt)</option>
+                </select>
+              </div>
             </div>
 
-            {/* Digital MB Dimension Calculator */}
-            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
-              <div className="text-xs font-bold text-slate-700 uppercase">
-                Digital Measurement Sheet ({activeWO?.unit || 'Unit'} Calculator)
+            {/* Live Calculation Summary Box */}
+            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs">
+              <div className="mb-2 flex items-center gap-1.5 font-bold text-slate-700 uppercase">
+                <Calculator className="h-4 w-4 text-blue-700" /> Live RA Bill Settlement Sheet
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-500 mb-1">Nos (Count)</label>
-                  <input
-                    type="number"
-                    step="1"
-                    value={dimNos}
-                    onChange={(e) => setDimNos(e.target.value)}
-                    className="w-full border border-slate-300 bg-white rounded-md px-2.5 py-1.5 text-sm font-semibold"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-500 mb-1">Length (L) / Total Qty*</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    required
-                    placeholder="e.g. 25.5"
-                    value={dimL}
-                    onChange={(e) => setDimL(e.target.value)}
-                    className="w-full border border-slate-300 bg-white rounded-md px-2.5 py-1.5 text-sm font-semibold"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-500 mb-1">Breadth (B) [Default 1]</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={dimB}
-                    onChange={(e) => setDimB(e.target.value)}
-                    className="w-full border border-slate-300 bg-white rounded-md px-2.5 py-1.5 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-500 mb-1">Height/Depth (H) [Default 1]</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={dimH}
-                    onChange={(e) => setDimH(e.target.value)}
-                    className="w-full border border-slate-300 bg-white rounded-md px-2.5 py-1.5 text-sm"
-                  />
-                </div>
-                <div className="bg-blue-50 border border-blue-200 rounded-md p-2 flex flex-col justify-center">
-                  <span className="text-[10px] font-bold text-blue-700 uppercase">Net Measured Qty</span>
-                  <span className={`text-base font-bold ${isOverWoLimit ? 'text-red-600' : 'text-blue-900'}`}>
-                    {calculatedMbQty} {activeWO?.unit || ''}
-                  </span>
-                </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                <span className="text-slate-600">Gross Current Work Value:</span>
+                <span className="text-right font-mono font-bold">₹ {liveGross.toLocaleString('en-IN')}</span>
+
+                <span className="text-slate-600">Add: GST ({formData.gst_percent}%):</span>
+                <span className="text-right font-mono text-blue-700">+ ₹ {liveGst.toLocaleString('en-IN')}</span>
+
+                <span className="text-amber-700">Less: Retention Held ({formData.retention_percent}%):</span>
+                <span className="text-right font-mono text-amber-700">
+                  - ₹ {liveRetention.toLocaleString('en-IN')}
+                </span>
+
+                <span className="text-rose-700">Less: Sec 194C TDS ({formData.tds_percent}%):</span>
+                <span className="text-right font-mono text-rose-700">- ₹ {liveTds.toLocaleString('en-IN')}</span>
+
+                <span className="border-t pt-1.5 text-sm font-extrabold text-slate-900">
+                  Net Payable to Contractor:
+                </span>
+                <span className="border-t pt-1.5 text-right font-mono text-sm font-extrabold text-emerald-700">
+                  ₹ {liveNetPayable.toLocaleString('en-IN')}
+                </span>
               </div>
             </div>
 
-            {isOverWoLimit && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-800 font-semibold flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-red-600" />
-                WORK ORDER CAP EXCEEDED: Measured Qty ({calculatedMbQty}) is greater than remaining Work Order balance ({balanceWoQty} {activeWO?.unit}).
-              </div>
-            )}
-
-            {/* Auto-Detected Chargeable Store Recoveries */}
-            {pendingRecoveries.length > 0 && (
-              <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900 space-y-1">
-                <div className="font-bold flex items-center gap-1.5">
-                  <AlertTriangle className="w-4 h-4 text-amber-600" />
-                  Auto-Linked Central Store Recoveries Detected for {activeWO?.contractor_name}:
-                </div>
-                {pendingRecoveries.map((rec) => (
-                  <div key={rec.id} className="pl-5 text-amber-800">
-                    • Slip <strong>{rec.issue_slip_no}</strong>: {rec.material_name} ({rec.issued_qty} {rec.unit}) — <strong>{formatINR(rec.recovery_amount)}</strong>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Financial Deduction Waterfall Box */}
-            {activeWO && calculatedMbQty > 0 && (
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 p-4 bg-slate-900 text-white rounded-xl text-xs">
-                <div>
-                  <span className="text-slate-400 block">Gross Work Value</span>
-                  <span className="text-sm font-bold text-white">{formatINR(grossBillAmount)}</span>
-                </div>
-                <div>
-                  <span className="text-slate-400 block">(-) Retention ({activeWO.retention_percent}%)</span>
-                  <span className="text-sm font-bold text-amber-400">- {formatINR(retentionAmt)}</span>
-                </div>
-                <div>
-                  <span className="text-slate-400 block">(-) Income Tax TDS ({activeWO.tds_percent}%)</span>
-                  <span className="text-sm font-bold text-amber-400">- {formatINR(tdsAmt)}</span>
-                </div>
-                <div>
-                  <span className="text-slate-400 block">(-) Store Material Recovery</span>
-                  <span className="text-sm font-bold text-red-400">- {formatINR(storeRecoveryAmt)}</span>
-                </div>
-                <div className="border-l border-slate-700 pl-3">
-                  <span className="text-emerald-400 font-bold block uppercase">Net Payable RA Bill</span>
-                  <span className="text-base font-bold text-emerald-300">{formatINR(netPayableAmount)}</span>
-                </div>
-              </div>
-            )}
-
-            <div className="flex justify-end">
+            <div className="mt-5 flex justify-end gap-2">
               <button
-                type="submit"
-                disabled={submittingBill || !activeWO || calculatedMbQty <= 0 || isOverWoLimit}
-                className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg disabled:opacity-50"
+                type="button"
+                onClick={() => setShowModal(false)}
+                className="rounded border px-4 py-2 text-sm"
               >
-                <Send className="w-4 h-4" />
-                {submittingBill ? 'Routing RA Bill to MD...' : 'Certify MB & Route RA Bill to MD Desk'}
+                Cancel
+              </button>
+              <button type="submit" className="rounded bg-blue-700 px-4 py-2 text-sm font-semibold text-white">
+                Save &amp; Generate RA Bill
               </button>
             </div>
           </form>
-
-          {/* Certified RA Bills Register */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="px-6 py-3 bg-slate-900 text-white text-sm font-semibold">
-              Sub-Contractor RA Billing & Deduction Ledger
-            </div>
-            <div className="overflow-x-auto">
-              {loading ? (
-                <div className="p-8 text-center text-sm text-slate-500">Loading RA Bills...</div>
-              ) : bills.length === 0 ? (
-                <div className="p-8 text-center text-sm text-slate-500">Abhi tak koi Contractor RA Bill certify nahi hua hai.</div>
-              ) : (
-                <table className="w-full text-left border-collapse text-sm">
-                  <thead>
-                    <tr className="bg-slate-50 border-b border-slate-200 text-xs uppercase text-slate-500 font-semibold">
-                      <th className="py-3 px-4">RA Bill & MB</th>
-                      <th className="py-3 px-4">Sub-Contractor</th>
-                      <th className="py-3 px-4">Gross Amount</th>
-                      <th className="py-3 px-4">Deductions (Ret / TDS / Store)</th>
-                      <th className="py-3 px-4">Net Payable</th>
-                      <th className="py-3 px-4">MD Approval</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {bills.map((b) => (
-                      <tr key={b.id} className="hover:bg-slate-50">
-                        <td className="py-3 px-4">
-                          <div className="font-bold text-slate-900">{b.ra_bill_number}</div>
-                          <div className="text-xs text-slate-500">{b.mb_number} • {b.current_billed_qty} {b.enterprise_work_orders?.unit}</div>
-                        </td>
-                        <td className="py-3 px-4 font-semibold text-slate-800">{b.contractor_name}</td>
-                        <td className="py-3 px-4 font-medium">{formatINR(b.gross_amount)}</td>
-                        <td className="py-3 px-4 text-xs text-red-700">
-                          Ret: {formatINR(b.retention_deduction)} | TDS: {formatINR(b.tds_deduction)} | Store: {formatINR(b.material_recovery_deduction)}
-                        </td>
-                        <td className="py-3 px-4 font-bold text-emerald-700">{formatINR(b.net_payable)}</td>
-                        <td className="py-3 px-4">
-                          <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
-                            {b.approval_status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
         </div>
-      )}
-
-      {/* TAB 2: ISSUE NEW WORK ORDER */}
-      {activeTab === 'WO' && (
-        <form onSubmit={handleCreateWorkOrder} className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
-          <div className="font-bold text-sm text-slate-800 border-b border-slate-100 pb-2">
-            Issue New Item-Rate Sub-Contractor Work Order (WO)
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Sub-Contractor Firm Name*</label>
-              <input
-                type="text"
-                required
-                placeholder="e.g., M/s Maa Tara Civil Contractors"
-                value={woContractor}
-                onChange={(e) => setWoContractor(e.target.value)}
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">WBS Activity Code</label>
-              <select
-                value={woWbs}
-                onChange={(e) => setWoWbs(e.target.value)}
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
-              >
-                <option value="WBS-1.0">WBS-1.0 Sub-Structure</option>
-                <option value="WBS-2.0">WBS-2.0 Super-Structure</option>
-                <option value="WBS-3.0">WBS-3.0 Masonry & Plaster</option>
-                <option value="WBS-4.0">WBS-4.0 MEP & Fire</option>
-                <option value="WBS-5.0">WBS-5.0 Finishing & Infra</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Scope / Work Description*</label>
-              <input
-                type="text"
-                required
-                placeholder="e.g., RCC Slab Shuttering & Bar Bending"
-                value={woDesc}
-                onChange={(e) => setWoDesc(e.target.value)}
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Unit</label>
-              <select
-                value={woUnit}
-                onChange={(e) => setWoUnit(e.target.value)}
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
-              >
-                <option value="Cum">Cum</option>
-                <option value="Sqm">Sqm</option>
-                <option value="Sqft">Sqft</option>
-                <option value="MT">MT</option>
-                <option value="Rmt">Rmt</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Sanctioned Max Qty*</label>
-              <input
-                type="number"
-                step="0.01"
-                required
-                placeholder="Max Qty"
-                value={woQty}
-                onChange={(e) => setWoQty(e.target.value)}
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-semibold"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Contract Rate (₹)*</label>
-              <input
-                type="number"
-                step="0.01"
-                required
-                placeholder="Rate per Unit"
-                value={woRate}
-                onChange={(e) => setWoRate(e.target.value)}
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-semibold"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Retention (%)</label>
-              <input
-                type="number"
-                step="0.5"
-                value={woRetention}
-                onChange={(e) => setWoRetention(e.target.value)}
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">TDS u/s 194C (%)</label>
-              <select
-                value={woTds}
-                onChange={(e) => setWoTds(e.target.value)}
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
-              >
-                <option value="1">1% (Individual / Prop.)</option>
-                <option value="2">2% (Pvt Ltd / Partnership)</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="flex justify-end">
-            <button
-              type="submit"
-              disabled={savingWo}
-              className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-lg"
-            >
-              <Plus className="w-4 h-4" /> {savingWo ? 'Creating WO...' : 'Sanction & Issue Work Order'}
-            </button>
-          </div>
-        </form>
       )}
     </div>
   );
