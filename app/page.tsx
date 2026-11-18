@@ -1,108 +1,208 @@
-'use client'
+'use client';
 
-import { useState, useEffect } from 'react'
-import Link from 'next/link'
-import { supabase } from '@/lib/supabase'
+import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { createClient } from '@supabase/supabase-js';
+import {
+  Building2,
+  ShoppingCart,
+  FileSpreadsheet,
+  ClipboardCheck,
+  Landmark,
+  Package,
+  ArrowRight,
+  HardHat,
+  Receipt,
+  TrendingUp,
+} from 'lucide-react';
 
-export default function EnterpriseDashboard() {
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
+
+interface ProjectSummary {
+  id: string;
+  name: string;
+  budget: number;
+  status?: string;
+}
+
+export default function MainDashboard() {
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [stats, setStats] = useState({
-    totalProjects: 3,
-    totalPortfolioValue: 675000000,
-    storeItems: 5,
-    pendingPOs: 12,
-  })
+    projectsCount: 0,
+    totalBudget: 0,
+    poCount: 0,
+    pendingBills: 0,
+  });
+
+  useEffect(() => {
+    async function loadDashboard() {
+      const [projRes, poRes, billRes] = await Promise.all([
+        supabase.from('projects').select('id, name, budget, status'),
+        supabase.from('purchase_orders').select('id'),
+        supabase.from('vendor_bills').select('id').neq('matching_status', 'MATCHED'),
+      ]);
+
+      const projectList = (projRes.data as ProjectSummary[]) || [];
+      const totalVal = projectList.reduce((sum, p) => sum + (Number(p.budget) || 0), 0);
+
+      setProjects(projectList);
+      setStats({
+        projectsCount: projectList.length,
+        totalBudget: totalVal,
+        poCount: poRes.data?.length || 0,
+        pendingBills: billRes.data?.length || 0,
+      });
+    }
+    loadDashboard();
+  }, []);
+
+  const modules = [
+    {
+      name: 'Enterprise Finance & 3-Way Audit',
+      href: '/finance',
+      desc: 'PO = GRN = Vendor Bill Matching, GST Ledger & Live P&L',
+      icon: Landmark,
+    },
+    {
+      name: 'Purchase Orders (PO)',
+      href: '/po',
+      desc: 'Material procurement, vendor rates & GST orders',
+      icon: ShoppingCart,
+    },
+    {
+      name: 'Bill of Quantities (BOQ)',
+      href: '/boq',
+      desc: 'Project cost estimation & rate analysis',
+      icon: FileSpreadsheet,
+    },
+    {
+      name: 'Daily Progress Report (DPR)',
+      href: '/dpr',
+      desc: 'Site execution & daily work logs',
+      icon: ClipboardCheck,
+    },
+    {
+      name: 'Store Inventory & GRN',
+      href: '/inventory',
+      desc: 'Site stock receipts & material issues',
+      icon: Package,
+    },
+    {
+      name: 'Contractor Bills & MB',
+      href: '/contractor-bills',
+      desc: 'Measurement Book & RA billing',
+      icon: Receipt,
+    },
+    {
+      name: 'Labor Muster Roll',
+      href: '/labor',
+      desc: 'Site workforce attendance & wage sheets',
+      icon: HardHat,
+    },
+    {
+      name: 'Real Estate Sales & Milestones',
+      href: '/milestones',
+      desc: 'Unit booking & customer payment schedules',
+      icon: Building2,
+    },
+    {
+      name: 'Analytics & MIS Reports',
+      href: '/analytics',
+      desc: 'Executive cashflow & project performance insights',
+      icon: TrendingUp,
+    },
+  ];
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 p-8 font-sans">
-      
-      {/* Top Elite Corporate Banner */}
-      <div className="relative overflow-hidden bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 border border-slate-800 rounded-3xl p-8 mb-10 shadow-2xl">
-        <div className="absolute -right-10 -bottom-10 w-96 h-96 bg-blue-600/10 rounded-full blur-3xl pointer-events-none"></div>
-        <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-          <div>
-            <div className="flex items-center gap-3 mb-3">
-              <span className="bg-blue-600 text-white text-[10px] font-extrabold uppercase tracking-widest px-3 py-1 rounded-full shadow-lg shadow-blue-600/30">
-                Enterprise Command Center v4.2
-              </span>
-              <span className="flex items-center gap-1.5 text-xs text-emerald-400 font-semibold bg-emerald-950/60 border border-emerald-800/60 px-3 py-1 rounded-full">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span> Real-Time Sync Active
-              </span>
-            </div>
-            <h1 className="text-4xl font-black tracking-tight text-white mb-2">
-              UNIVERSAL ENGICON PRIVATE LIMITED
-            </h1>
-            <p className="text-slate-400 text-sm max-w-2xl">
-              Civil Construction, Mega Infrastructure & Real Estate Development Enterprise ERP. Overseeing Godrej Zen Estate Phase-2 and high-scale execution modules.
-            </p>
-          </div>
-          <div className="bg-slate-900/90 border border-slate-800 p-5 rounded-2xl backdrop-blur-md shadow-xl text-right min-w-[220px]">
-            <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold block mb-1">Total Asset Valuation</span>
-            <span className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-emerald-400">
-              ₹67,50,00,000
-            </span>
-          </div>
+    <div className="min-h-screen bg-slate-50 p-6 text-slate-900">
+      <div className="mb-6 flex flex-col justify-between gap-2 border-b border-slate-200 pb-4 md:flex-row md:items-center">
+        <div>
+          <span className="text-xs font-bold tracking-wider text-blue-700 uppercase">
+            Universal Engicon Pvt. Ltd. • MD Command Center
+          </span>
+          <h1 className="text-2xl font-extrabold text-slate-900">Executive ERP Dashboard</h1>
+        </div>
+        <Link
+          href="/finance"
+          className="inline-flex items-center gap-2 rounded-lg bg-blue-700 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-800"
+        >
+          Open Live P&amp;L &amp; 3-Way Audit <ArrowRight className="h-3.5 w-3.5" />
+        </Link>
+      </div>
+
+      <div className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-4">
+        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <p className="text-xs font-medium text-slate-500">Active Projects</p>
+          <p className="mt-1 text-2xl font-bold text-slate-900">{stats.projectsCount}</p>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <p className="text-xs font-medium text-slate-500">Total Contract Value</p>
+          <p className="mt-1 text-2xl font-bold text-blue-700">
+            ₹ {stats.totalBudget.toLocaleString('en-IN')}
+          </p>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <p className="text-xs font-medium text-slate-500">Total Purchase Orders</p>
+          <p className="mt-1 text-2xl font-bold text-emerald-700">{stats.poCount}</p>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <p className="text-xs font-medium text-slate-500">3-Way Audit Holds</p>
+          <p className="mt-1 text-2xl font-bold text-rose-600">{stats.pendingBills}</p>
         </div>
       </div>
 
-      {/* Elite Key Performance Indicators (KPI) Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-10">
-        <div className="bg-slate-900/80 border border-slate-800/80 rounded-2xl p-6 shadow-xl backdrop-blur-sm relative group hover:border-blue-500/50 transition-all duration-300">
-          <div className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-2">Active Mega Projects</div>
-          <div className="text-3xl font-black text-white">{stats.totalProjects} Sites</div>
-          <div className="mt-3 text-xs text-blue-400 font-medium">Godrej Zen Phase-2 & Urban Wings</div>
+      {projects.length > 0 && (
+        <div className="mb-8">
+          <h2 className="mb-3 text-sm font-bold tracking-wider text-slate-600 uppercase">
+            Active Sites &amp; Projects
+          </h2>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            {projects.map((proj) => (
+              <div key={proj.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-slate-900">{proj.name}</h3>
+                  <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700">
+                    {proj.status || 'ACTIVE'}
+                  </span>
+                </div>
+                <p className="mt-2 font-mono text-sm font-semibold text-blue-700">
+                  Budget: ₹ {Number(proj.budget || 0).toLocaleString('en-IN')}
+                </p>
+              </div>
+            ))}
+          </div>
         </div>
+      )}
 
-        <div className="bg-slate-900/80 border border-slate-800/80 rounded-2xl p-6 shadow-xl backdrop-blur-sm relative group hover:border-emerald-500/50 transition-all duration-300">
-          <div className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-2">Store Inventory Status</div>
-          <div className="text-3xl font-black text-emerald-400">{stats.storeItems} Items</div>
-          <div className="mt-3 text-xs text-slate-400 font-medium">Cement, TMT, Aggregates in Stock</div>
-        </div>
-
-        <div className="bg-slate-900/80 border border-slate-800/80 rounded-2xl p-6 shadow-xl backdrop-blur-sm relative group hover:border-amber-500/50 transition-all duration-300">
-          <div className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-2">Pending PO Approvals</div>
-          <div className="text-3xl font-black text-amber-400">{stats.pendingPOs} Active</div>
-          <div className="mt-3 text-xs text-amber-400/80 font-medium">Awaiting MD Sign-off</div>
-        </div>
-
-        <div className="bg-slate-900/80 border border-slate-800/80 rounded-2xl p-6 shadow-xl backdrop-blur-sm relative group hover:border-indigo-500/50 transition-all duration-300">
-          <div className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-2">Tax & GST Compliance</div>
-          <div className="text-3xl font-black text-indigo-400">100% Filed</div>
-          <div className="mt-3 text-xs text-indigo-400/80 font-medium">GSTR-3B & GSTR-1 Synchronized</div>
-        </div>
-      </div>
-
-      {/* Core Operational Modules Section */}
-      <h2 className="text-xl font-extrabold text-white mb-6 flex items-center gap-3">
-        <span className="w-2.5 h-2.5 rounded-full bg-blue-600"></span> Executive Operational Modules
+      <h2 className="mb-4 text-sm font-bold tracking-wider text-slate-600 uppercase">
+        Enterprise Modules
       </h2>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        
-        <Link href="/purchase-orders" className="bg-slate-900/70 border border-slate-800 hover:border-blue-500/60 p-6 rounded-2xl shadow-lg transition-all duration-300 group">
-          <div className="w-12 h-12 rounded-xl bg-blue-600/10 border border-blue-500/20 text-blue-400 flex items-center justify-center font-bold text-lg mb-4 group-hover:scale-110 transition-transform">
-            PO
-          </div>
-          <h3 className="text-lg font-bold text-white mb-1 group-hover:text-blue-400 transition-colors">Purchase Orders (PO)</h3>
-          <p className="text-slate-400 text-xs leading-relaxed">Smart vendor contracting, auto PR matching, item specs and automated GST calculations.</p>
-        </Link>
-
-        <Link href="/dpr" className="bg-slate-900/70 border border-slate-800 hover:border-emerald-500/60 p-6 rounded-2xl shadow-lg transition-all duration-300 group">
-          <div className="w-12 h-12 rounded-xl bg-emerald-600/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-lg mb-4 group-hover:scale-110 transition-transform">
-            DPR
-          </div>
-          <h3 className="text-lg font-bold text-white mb-1 group-hover:text-emerald-400 transition-colors">Daily Progress Report (DPR)</h3>
-          <p className="text-slate-400 text-xs leading-relaxed">Labour attendance, material daily consumption tracking, and on-site engineering milestones.</p>
-        </Link>
-
-        <Link href="/boq" className="bg-slate-900/70 border border-slate-800 hover:border-amber-500/60 p-6 rounded-2xl shadow-lg transition-all duration-300 group">
-          <div className="w-12 h-12 rounded-xl bg-amber-600/10 border border-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-lg mb-4 group-hover:scale-110 transition-transform">
-            BOQ
-          </div>
-          <h3 className="text-lg font-bold text-white mb-1 group-hover:text-amber-400 transition-colors">Bill of Quantities (BOQ)</h3>
-          <p className="text-slate-400 text-xs leading-relaxed">Comprehensive structural cost estimations, material rate schedules, and budgeting analysis.</p>
-        </Link>
-
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        {modules.map((mod) => {
+          const Icon = mod.icon;
+          return (
+            <Link
+              key={mod.href}
+              href={mod.href}
+              className="group flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-blue-600 hover:shadow-md"
+            >
+              <div>
+                <div className="mb-3 inline-flex rounded-lg bg-blue-50 p-2.5 text-blue-700">
+                  <Icon className="h-5 w-5" />
+                </div>
+                <h3 className="font-bold text-slate-900 group-hover:text-blue-700">{mod.name}</h3>
+                <p className="mt-1 text-xs text-slate-500">{mod.desc}</p>
+              </div>
+              <div className="mt-4 flex items-center gap-1 text-xs font-semibold text-blue-700">
+                Open Module <ArrowRight className="h-3.5 w-3.5" />
+              </div>
+            </Link>
+          );
+        })}
       </div>
     </div>
-  )
+  );
 }

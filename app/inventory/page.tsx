@@ -1,301 +1,695 @@
-"use client";
+'use client';
 
-import { useEffect, useState } from "react";
-import { supabase } from "@/utils/supabase";
-import { ArrowLeft, Plus, Package, Truck, FileText, Search, LayoutDashboard } from "lucide-react";
-import Link from "next/link";
+import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { supabase } from '@/lib/supabase';
+import { 
+  Warehouse, ArrowLeft, Truck, ArrowUpRight, PackageCheck, 
+  AlertTriangle, CheckCircle2, ShieldAlert 
+} from 'lucide-react';
 
-export default function InventoryPage() {
-  const [activeTab, setActiveTab] = useState("stock"); // 'stock' ya 'grn'
+interface Project {
+  id: number;
+  name: string;
+}
+
+interface PurchaseOrder {
+  id: number;
+  po_number: string;
+  project_id: number;
+  item_name: string;
+  quantity: number;
+  unit: string;
+  rate: number;
+  enterprise_vendors?: { name: string };
+}
+
+interface StockItem {
+  id: number;
+  project_id: number;
+  material_name: string;
+  unit: string;
+  total_received: number;
+  total_issued: number;
+  current_balance: number;
+  avg_rate: number;
+}
+
+interface GRNRecord {
+  id: number;
+  grn_number: string;
+  vehicle_number: string;
+  challan_number: string;
+  material_name: string;
+  received_qty: number;
+  unit: string;
+  grn_value: number;
+  qc_status: string;
+  created_at: string;
+  purchase_orders?: { po_number: string };
+}
+
+interface IssueRecord {
+  id: number;
+  issue_slip_no: string;
+  material_name: string;
+  issued_qty: number;
+  unit: string;
+  issued_to_contractor: string;
+  issue_type: string;
+  recovery_amount: number;
+  wbs_location: string;
+  created_at: string;
+}
+
+export default function ZeroLeakageCentralStore() {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
+  const [activeTab, setActiveTab] = useState<'GRN' | 'ISSUE' | 'STOCK'>('GRN');
+
+  const [projectPOs, setProjectPOs] = useState<PurchaseOrder[]>([]);
+  const [stockList, setStockList] = useState<StockItem[]>([]);
+  const [grnHistory, setGrnHistory] = useState<GRNRecord[]>([]);
+  const [issueHistory, setIssueHistory] = useState<IssueRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // --- STOCK (Purana Code) STATES ---
-  const [materials, setMaterials] = useState<any[]>([]);
-  const [showForm, setShowForm] = useState(false);
-  const [savingStock, setSavingStock] = useState(false);
-  const [newMaterial, setNewMaterial] = useState({
-    name: "", category: "Cement", quantity: "", unit: "Bags",
-  });
+  // GRN Form State
+  const [selectedPoId, setSelectedPoId] = useState<number | null>(null);
+  const [vehicleNo, setVehicleNo] = useState('');
+  const [challanNo, setChallanNo] = useState('');
+  const [receivedQty, setReceivedQty] = useState('');
+  const [qcStatus, setQcStatus] = useState('PASSED');
+  const [submittingGrn, setSubmittingGrn] = useState(false);
 
-  // --- GRN (Naya Code) STATES ---
-  const [grnList, setGrnList] = useState<any[]>([]);
-  const [approvedPOs, setApprovedPOs] = useState<any[]>([]);
-  const [grnNumber, setGrnNumber] = useState("");
-  const [selectedPOId, setSelectedPOId] = useState("");
-  const [poNumber, setPoNumber] = useState("");
-  const [projectName, setProjectName] = useState("");
-  const [materialDesc, setMaterialDesc] = useState("");
-  const [receivedQty, setReceivedQty] = useState("");
-  const [challanNumber, setChallanNumber] = useState("");
-  const [vehicleNumber, setVehicleNumber] = useState("");
-  const [savingGRN, setSavingGRN] = useState(false);
+  // Material Issue Form State
+  const [selectedStockId, setSelectedStockId] = useState<number | null>(null);
+  const [issueQty, setIssueQty] = useState('');
+  const [contractorName, setContractorName] = useState('');
+  const [issueType, setIssueType] = useState<'FREE_ISSUE' | 'CHARGEABLE_RECOVERY'>('FREE_ISSUE');
+  const [wbsLocation, setWbsLocation] = useState('WBS-2.0 Super-Structure');
+  const [submittingIssue, setSubmittingIssue] = useState(false);
 
   useEffect(() => {
-    fetchMaterials();
-    fetchApprovedPOs();
-    fetchGRNs();
-    generateGRNNumber();
+    fetchProjects();
   }, []);
 
-  // --- STOCK FUNCTIONS ---
-  async function fetchMaterials() {
-    try {
-      const { data, error } = await supabase
-        .from("materials")
-        .select("*")
-        .order("id", { ascending: false });
-      if (data) setMaterials(data);
-    } catch (error) {
-      console.error(error);
-    } finally {
+  useEffect(() => {
+    if (selectedProjectId) {
+      loadStoreData(selectedProjectId);
+    }
+  }, [selectedProjectId]);
+
+  async function fetchProjects() {
+    const { data } = await supabase.from('projects').select('id, name').order('id');
+    if (data && data.length > 0) {
+      setProjects(data);
+      setSelectedProjectId(data[0].id);
+    } else {
       setLoading(false);
     }
   }
 
-  async function handleAddMaterial(e: React.FormEvent) {
-    e.preventDefault();
-    setSavingStock(true);
-    try {
-      const { error } = await supabase.from("materials").insert([
-        {
-          name: newMaterial.name,
-          category: newMaterial.category,
-          quantity: Number(newMaterial.quantity),
-          unit: newMaterial.unit,
-        },
-      ]);
-      if (!error) {
-        setNewMaterial({ name: "", category: "Cement", quantity: "", unit: "Bags" });
-        setShowForm(false);
-        fetchMaterials();
-      } else alert("Error: " + error.message);
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setSavingStock(false);
-    }
-  }
-
-  // --- GRN FUNCTIONS ---
-  const generateGRNNumber = () => {
-    const randomNum = Math.floor(100000 + Math.random() * 900000);
-    setGrnNumber(`GRN-UE-${randomNum}`);
-  };
-
-  const fetchApprovedPOs = async () => {
-    const { data } = await supabase
-      .from("purchase_orders")
-      .select("*")
-      .eq("status", "Approved")
-      .order("created_at", { ascending: false });
-    if (data) setApprovedPOs(data);
-  };
-
-  const fetchGRNs = async () => {
-    const { data } = await supabase
-      .from("goods_receipt_notes")
-      .select("*")
-      .order("created_at", { ascending: false });
-    if (data) setGrnList(data);
-  };
-
-  const handlePOChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const id = e.target.value;
-    setSelectedPOId(id);
-    if (id) {
-      const selectedPO = approvedPOs.find(po => po.id.toString() === id);
-      if (selectedPO) {
-        setPoNumber(selectedPO.po_number);
-        setProjectName(selectedPO.project_name);
-        setMaterialDesc(selectedPO.material_desc);
-      }
-    } else {
-      setPoNumber(""); setProjectName(""); setMaterialDesc("");
-    }
-  };
-
-  const handleSaveGRN = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedPOId) return alert("Select PO first.");
-    setSavingGRN(true);
-    
-    const qty = parseFloat(receivedQty);
-    const { error } = await supabase.from("goods_receipt_notes").insert([
-      { grn_number: grnNumber, po_number: poNumber, project_name: projectName, material_desc: materialDesc, received_qty: qty, challan_number: challanNumber, vehicle_number: vehicleNumber },
+  async function loadStoreData(projectId: number) {
+    setLoading(true);
+    const [poRes, stockRes, grnRes, issueRes] = await Promise.all([
+      supabase.from('purchase_orders').select('*, enterprise_vendors(name)').eq('project_id', projectId).order('id', { ascending: false }),
+      supabase.from('enterprise_store_stock').select('*').eq('project_id', projectId).order('material_name'),
+      supabase.from('enterprise_grn').select('*, purchase_orders(po_number)').eq('project_id', projectId).order('id', { ascending: false }),
+      supabase.from('enterprise_material_issues').select('*').eq('project_id', projectId).order('id', { ascending: false })
     ]);
 
+    if (poRes.data) {
+      setProjectPOs(poRes.data);
+      setSelectedPoId(poRes.data.length > 0 ? poRes.data[0].id : null);
+    }
+    if (stockRes.data) {
+      setStockList(stockRes.data);
+      setSelectedStockId(stockRes.data.length > 0 ? stockRes.data[0].id : null);
+    }
+    if (grnRes.data) setGrnHistory(grnRes.data);
+    if (issueRes.data) setIssueHistory(issueRes.data);
+    setLoading(false);
+  }
+
+  // Active PO Calculation for GRN Validation
+  const activePO = projectPOs.find((p) => p.id === selectedPoId);
+  const alreadyReceivedForPO = activePO
+    ? grnHistory.filter((g) => g.purchase_orders?.po_number === activePO.po_number).reduce((s, g) => s + Number(g.received_qty), 0)
+    : 0;
+  const pendingPoQty = activePO ? Math.max(0, Number(activePO.quantity) - alreadyReceivedForPO) : 0;
+  const numRecQty = Number(receivedQty) || 0;
+  const isGrnOverPO = activePO ? numRecQty > pendingPoQty : false;
+
+  async function handleCreateGRN(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selectedProjectId || !activePO || numRecQty <= 0) return;
+
+    if (isGrnOverPO) {
+      alert(`GATE BLOCKED: Received Qty (${numRecQty}) exceeds Pending PO Balance (${pendingPoQty} ${activePO.unit})!`);
+      return;
+    }
+
+    setSubmittingGrn(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    const grnNumber = `UEPL/GRN/26-27/${String(grnHistory.length + 501).padStart(4, '0')}`;
+
+    // 1. Insert GRN
+    const { error } = await supabase.from('enterprise_grn').insert({
+      grn_number: grnNumber,
+      project_id: selectedProjectId,
+      po_id: activePO.id,
+      vehicle_number: vehicleNo.toUpperCase(),
+      challan_number: challanNo.toUpperCase(),
+      material_name: activePO.item_name,
+      unit: activePO.unit,
+      received_qty: numRecQty,
+      po_rate: activePO.rate,
+      qc_status: qcStatus,
+      received_by: user?.email || 'store@universalengicon.com'
+    });
+
     if (!error) {
-      // Bonus: Automatic Master Stock Update (Jab truck aayega toh main inventory bhi badhegi)
-      const existingMaterial = materials.find(m => m.name.toLowerCase() === materialDesc.toLowerCase() || materialDesc.toLowerCase().includes(m.name.toLowerCase()));
-      if(existingMaterial) {
-        await supabase.from("materials").update({ quantity: existingMaterial.quantity + qty }).eq("id", existingMaterial.id);
+      // 2. Update or Insert Live Central Store Stock
+      const existingStock = stockList.find((s) => s.material_name === activePO.item_name);
+      if (existingStock) {
+        await supabase
+          .from('enterprise_store_stock')
+          .update({
+            total_received: Number(existingStock.total_received) + numRecQty,
+            avg_rate: activePO.rate,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', existingStock.id);
+      } else {
+        await supabase.from('enterprise_store_stock').insert({
+          project_id: selectedProjectId,
+          material_name: activePO.item_name,
+          unit: activePO.unit,
+          total_received: numRecQty,
+          total_issued: 0,
+          avg_rate: activePO.rate
+        });
       }
 
-      setSelectedPOId(""); setPoNumber(""); setProjectName(""); setMaterialDesc(""); setReceivedQty(""); setChallanNumber(""); setVehicleNumber("");
-      generateGRNNumber();
-      fetchGRNs();
-      fetchMaterials(); // Stock wapas load karein updated quantity ke sath
-    } else alert("Error saving GRN: " + error.message);
-    
-    setSavingGRN(false);
-  };
+      // 3. Audit Log
+      await supabase.from('enterprise_audit_logs').insert({
+        user_id: user?.id,
+        user_email: user?.email || 'store@universalengicon.com',
+        module_name: 'CENTRAL_STORE_GRN',
+        action_type: 'CREATE_GRN',
+        document_number: grnNumber,
+        new_values: { po: activePO.po_number, vehicle: vehicleNo, qty: numRecQty }
+      });
+
+      setVehicleNo('');
+      setChallanNo('');
+      setReceivedQty('');
+      await loadStoreData(selectedProjectId);
+    } else {
+      alert('GRN Error: ' + error.message);
+    }
+    setSubmittingGrn(false);
+  }
+
+  // Active Stock Calculation for Material Issue
+  const activeStock = stockList.find((s) => s.id === selectedStockId);
+  const numIssueQty = Number(issueQty) || 0;
+  const isStockInsufficient = activeStock ? numIssueQty > Number(activeStock.current_balance) : true;
+
+  async function handleMaterialIssue(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selectedProjectId || !activeStock || numIssueQty <= 0 || !contractorName) return;
+
+    if (isStockInsufficient) {
+      alert(`ISSUE BLOCKED: Store balance is only ${activeStock.current_balance} ${activeStock.unit}. Negative stock not allowed!`);
+      return;
+    }
+
+    setSubmittingIssue(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    const slipNo = `UEPL/MIS/26-27/${String(issueHistory.length + 801).padStart(4, '0')}`;
+
+    // 1. Insert Material Issue Slip
+    const { error } = await supabase.from('enterprise_material_issues').insert({
+      issue_slip_no: slipNo,
+      project_id: selectedProjectId,
+      material_name: activeStock.material_name,
+      unit: activeStock.unit,
+      issued_qty: numIssueQty,
+      issue_rate: activeStock.avg_rate || 0,
+      issued_to_contractor: contractorName,
+      issue_type: issueType,
+      wbs_location: wbsLocation
+    });
+
+    if (!error) {
+      // 2. Deduct from Central Store Stock
+      await supabase
+        .from('enterprise_store_stock')
+        .update({
+          total_issued: Number(activeStock.total_issued) + numIssueQty,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', activeStock.id);
+
+      // 3. Audit Log
+      await supabase.from('enterprise_audit_logs').insert({
+        user_id: user?.id,
+        user_email: user?.email || 'store@universalengicon.com',
+        module_name: 'STORE_MATERIAL_ISSUE',
+        action_type: issueType,
+        document_number: slipNo,
+        new_values: { contractor: contractorName, material: activeStock.material_name, qty: numIssueQty }
+      });
+
+      setIssueQty('');
+      setContractorName('');
+      await loadStoreData(selectedProjectId);
+    } else {
+      alert('Material Issue Error: ' + error.message);
+    }
+    setSubmittingIssue(false);
+  }
+
+  const formatINR = (val: number) =>
+    new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(val);
+
+  const totalInventoryValue = stockList.reduce((sum, s) => sum + Number(s.current_balance) * Number(s.avg_rate || 0), 0);
+  const totalChargeableRecovery = issueHistory
+    .filter((i) => i.issue_type === 'CHARGEABLE_RECOVERY')
+    .reduce((sum, i) => sum + Number(i.recovery_amount || 0), 0);
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans p-6">
-      <div className="max-w-7xl mx-auto">
-        
-        {/* Header */}
-        <div className="flex items-center justify-between mb-8 bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-          <div>
-            <h1 className="text-2xl font-black text-slate-800 flex items-center gap-2">
-              <Package className="text-orange-600" /> Store & Inventory
-            </h1>
-            <p className="text-slate-500 text-sm mt-1">Live Stock Dashboard & Goods Receipt (GRN)</p>
-          </div>
-          <Link href="/" className="flex items-center gap-2 text-slate-600 hover:text-orange-600 font-medium bg-slate-100 px-4 py-2 rounded-lg transition-colors">
-            <ArrowLeft size={18} /> Dashboard
+    <div className="min-h-screen bg-slate-50 text-slate-900 p-6 space-y-6">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between border-b border-slate-200 pb-4 gap-4">
+        <div>
+          <Link href="/" className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:underline mb-1">
+            <ArrowLeft className="w-3.5 h-3.5" /> Back to MD Command Center
           </Link>
+          <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
+            <Warehouse className="w-6 h-6 text-emerald-600" /> Zero-Leakage Central Store & GRN Control
+          </h1>
         </div>
 
-        {/* Tab Navigation */}
-        <div className="flex gap-4 mb-8">
-          <button onClick={() => setActiveTab("stock")} className={`px-6 py-3 rounded-lg font-bold flex items-center gap-2 transition-colors ${activeTab === "stock" ? "bg-orange-600 text-white shadow-sm" : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"}`}>
-            <LayoutDashboard size={18} /> Live Master Stock
-          </button>
-          <button onClick={() => setActiveTab("grn")} className={`px-6 py-3 rounded-lg font-bold flex items-center gap-2 transition-colors ${activeTab === "grn" ? "bg-orange-600 text-white shadow-sm" : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"}`}>
-            <Truck size={18} /> Receive Truck (GRN)
-          </button>
+        <div className="flex items-center gap-3">
+          <label className="text-xs font-bold text-slate-500 uppercase">Site Store:</label>
+          <select
+            value={selectedProjectId || ''}
+            onChange={(e) => setSelectedProjectId(Number(e.target.value))}
+            className="bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-semibold text-slate-800"
+          >
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* Store KPI Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+          <span className="text-xs font-semibold text-slate-500 uppercase">Live Site Inventory Valuation</span>
+          <div className="mt-2 text-2xl font-bold text-slate-900">{formatINR(totalInventoryValue)}</div>
+          <span className="text-xs text-emerald-600 font-medium">{stockList.length} Active SKUs in Central Yard</span>
         </div>
 
-        {/* --- TAB 1: LIVE MASTER STOCK --- */}
-        {activeTab === "stock" && (
-          <div className="space-y-6">
-            <div className="flex justify-end">
-              <button onClick={() => setShowForm(!showForm)} className="bg-slate-800 text-white px-5 py-2 rounded-lg shadow-sm hover:bg-slate-900 transition font-medium flex items-center gap-2">
-                {showForm ? "✖ Cancel" : <><Plus size={18} /> Add New Item to Catalog</>}
-              </button>
+        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+          <span className="text-xs font-semibold text-slate-500 uppercase">Total GRNs Verified (Inward)</span>
+          <div className="mt-2 text-2xl font-bold text-blue-700">{grnHistory.length} Challans</div>
+          <span className="text-xs text-slate-500">100% Matched against Sanctioned POs</span>
+        </div>
+
+        <div className="bg-white p-5 rounded-xl border border-amber-200 bg-amber-50/30 shadow-sm">
+          <span className="text-xs font-semibold text-amber-800 uppercase">Contractor Chargeable Recovery</span>
+          <div className="mt-2 text-2xl font-bold text-amber-900">{formatINR(totalChargeableRecovery)}</div>
+          <span className="text-xs text-amber-700 font-medium">Auto-Linked for RA Bill Deduction</span>
+        </div>
+      </div>
+
+      {/* Enterprise Store Tabs */}
+      <div className="flex gap-2 border-b border-slate-200 pb-2">
+        <button
+          onClick={() => setActiveTab('GRN')}
+          className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 ${
+            activeTab === 'GRN' ? 'bg-slate-900 text-white' : 'bg-white text-slate-700 border border-slate-200'
+          }`}
+        >
+          <Truck className="w-4 h-4 text-emerald-400" /> 1. Gate Entry & GRN (Inward)
+        </button>
+        <button
+          onClick={() => setActiveTab('ISSUE')}
+          className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 ${
+            activeTab === 'ISSUE' ? 'bg-slate-900 text-white' : 'bg-white text-slate-700 border border-slate-200'
+          }`}
+        >
+          <ArrowUpRight className="w-4 h-4 text-amber-400" /> 2. Material Issue & Contractor Recovery
+        </button>
+        <button
+          onClick={() => setActiveTab('STOCK')}
+          className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 ${
+            activeTab === 'STOCK' ? 'bg-slate-900 text-white' : 'bg-white text-slate-700 border border-slate-200'
+          }`}
+        >
+          <PackageCheck className="w-4 h-4 text-blue-400" /> 3. Live Stock Ledger ({stockList.length})
+        </button>
+      </div>
+
+      {/* TAB 1: GATE ENTRY & GRN */}
+      {activeTab === 'GRN' && (
+        <div className="space-y-6">
+          <form onSubmit={handleCreateGRN} className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <span className="font-bold text-sm text-slate-800">Record Material Arrival (PO-Locked Gate Entry & GRN)</span>
+              <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded">
+                3-Way Match Ready
+              </span>
             </div>
 
-            {showForm && (
-              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                <h2 className="text-lg font-bold text-slate-800 mb-4">Add Item to Master Stock</h2>
-                <form onSubmit={handleAddMaterial} className="grid grid-cols-1 md:grid-cols-5 gap-4">
-                  <div className="md:col-span-1">
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Category</label>
-                    <select className="w-full border border-slate-300 rounded-lg px-3 py-2 outline-none focus:border-orange-500" value={newMaterial.category} onChange={(e) => setNewMaterial({ ...newMaterial, category: e.target.value })}>
-                      <option value="Cement">Cement</option><option value="Steel">Steel / TMT</option><option value="Sand">Sand</option><option value="Bricks">Bricks</option><option value="Others">Others</option>
-                    </select>
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Material Name</label>
-                    <input type="text" required className="w-full border border-slate-300 rounded-lg px-3 py-2 outline-none focus:border-orange-500" value={newMaterial.name} onChange={(e) => setNewMaterial({ ...newMaterial, name: e.target.value })} placeholder="e.g. Nuvoco Cement" />
-                  </div>
-                  <div className="md:col-span-1">
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Opening Qty</label>
-                    <input type="number" required className="w-full border border-slate-300 rounded-lg px-3 py-2 outline-none focus:border-orange-500" value={newMaterial.quantity} onChange={(e) => setNewMaterial({ ...newMaterial, quantity: e.target.value })} placeholder="0" />
-                  </div>
-                  <div className="md:col-span-1">
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Unit</label>
-                    <select className="w-full border border-slate-300 rounded-lg px-3 py-2 outline-none focus:border-orange-500" value={newMaterial.unit} onChange={(e) => setNewMaterial({ ...newMaterial, unit: e.target.value })}>
-                      <option value="Bags">Bags</option><option value="Tons">Tons</option><option value="CFT">CFT</option><option value="Pieces">Pieces</option>
-                    </select>
-                  </div>
-                  <div className="md:col-span-5 flex justify-end mt-2">
-                    <button type="submit" disabled={savingStock} className="bg-emerald-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-emerald-700 transition">
-                      {savingStock ? "Adding..." : "Save to Catalog"}
-                    </button>
-                  </div>
-                </form>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="md:col-span-2">
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Select Open Purchase Order (PO)*</label>
+                <select
+                  value={selectedPoId || ''}
+                  onChange={(e) => setSelectedPoId(Number(e.target.value))}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-medium"
+                >
+                  {projectPOs.length === 0 && <option value="">No Purchase Orders found for this site</option>}
+                  {projectPOs.map((po) => (
+                    <option key={po.id} value={po.id}>
+                      {po.po_number || `PO-${po.id}`} • {po.item_name} ({po.quantity} {po.unit}) — {po.enterprise_vendors?.name || 'Vendor'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Pending PO Balance</label>
+                <div className="px-3 py-2 bg-slate-100 rounded-lg text-sm font-bold text-slate-800 border border-slate-200">
+                  {activePO ? `${pendingPoQty} ${activePO.unit} (Out of ${activePO.quantity})` : '0'}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Truck / Vehicle No.*</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g., BR-01-GA-4521"
+                  value={vehicleNo}
+                  onChange={(e) => setVehicleNo(e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm uppercase"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Vendor Challan / E-Way No.*</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g., CHL-88921"
+                  value={challanNo}
+                  onChange={(e) => setChallanNo(e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm uppercase"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">
+                  Net Accepted Qty ({activePO?.unit || 'Unit'})*
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  placeholder="Weighbridge Qty"
+                  value={receivedQty}
+                  onChange={(e) => setReceivedQty(e.target.value)}
+                  className={`w-full border rounded-lg px-3 py-2 text-sm font-bold ${
+                    isGrnOverPO ? 'border-red-500 bg-red-50 text-red-900' : 'border-slate-300'
+                  }`}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Site QA/QC Lab Check</label>
+                <select
+                  value={qcStatus}
+                  onChange={(e) => setQcStatus(e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-medium"
+                >
+                  <option value="PASSED">QC PASSED (Add to Stock)</option>
+                  <option value="HOLD_LAB_TEST">HOLD (Cube/Tensile Test)</option>
+                </select>
+              </div>
+            </div>
+
+            {isGrnOverPO && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-800 font-semibold flex items-center gap-2">
+                <ShieldAlert className="w-4 h-4 text-red-600" />
+                GATE ENTRY LOCKED: Received quantity cannot exceed pending PO balance ({pendingPoQty} {activePO?.unit}).
               </div>
             )}
 
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-              <table className="w-full text-left">
-                <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 text-sm">
-                  <tr>
-                    <th className="py-4 px-6 font-semibold">Material Name</th>
-                    <th className="py-4 px-6 font-semibold">Category</th>
-                    <th className="py-4 px-6 font-semibold">Total Stock Available</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {loading ? (
-                    <tr><td colSpan={3} className="py-8 text-center text-slate-500">Loading...</td></tr>
-                  ) : materials.length === 0 ? (
-                    <tr><td colSpan={3} className="py-8 text-center text-slate-500">Store is empty.</td></tr>
-                  ) : materials.map((item) => (
-                    <tr key={item.id} className="hover:bg-slate-50 transition">
-                      <td className="py-4 px-6 font-bold text-slate-800">{item.name}</td>
-                      <td className="py-4 px-6"><span className="bg-slate-100 text-slate-700 px-3 py-1 rounded-full text-xs font-bold border border-slate-200">{item.category}</span></td>
-                      <td className="py-4 px-6 font-black text-xl text-orange-600">{item.quantity.toLocaleString("en-IN")} <span className="text-sm font-medium text-slate-500">{item.unit}</span></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                disabled={submittingGrn || !activePO || isGrnOverPO}
+                className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg disabled:opacity-50"
+              >
+                {submittingGrn ? 'Generating GRN...' : 'Verify & Generate Official GRN'}
+              </button>
             </div>
-          </div>
-        )}
+          </form>
 
-        {/* --- TAB 2: RECEIVE TRUCK (GRN) --- */}
-        {activeTab === "grn" && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 lg:col-span-1 h-fit">
-              <h2 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-                <Truck size={20} className="text-orange-600" /> Inward Entry (GRN)
-              </h2>
-              <form onSubmit={handleSaveGRN} className="space-y-4">
-                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg mb-4">
-                  <label className="block text-sm font-bold text-amber-800 flex items-center gap-1 mb-1">
-                    <Search size={14} /> Link PO Number
-                  </label>
-                  <select required value={selectedPOId} onChange={handlePOChange} className="block w-full px-3 py-2 bg-white border border-amber-300 rounded-md outline-none focus:border-orange-500 text-sm">
-                    <option value="">-- Select PO to receive --</option>
-                    {approvedPOs.map(po => <option key={po.id} value={po.id}>{po.po_number} - {po.vendor_name}</option>)}
-                  </select>
-                </div>
-                <div><label className="block text-sm font-semibold text-slate-700">GRN Number</label><input readOnly type="text" value={grnNumber} className="mt-1 block w-full px-4 py-2 bg-slate-100 border border-slate-200 rounded-lg font-mono text-slate-600 font-bold" /></div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="col-span-2"><label className="block text-sm font-semibold text-slate-700">Delivery Site</label><input readOnly type="text" value={projectName} className="mt-1 block w-full px-4 py-2 bg-slate-100 border border-slate-200 rounded-lg text-slate-500" placeholder="Auto-filled" /></div>
-                  <div className="col-span-2"><label className="block text-sm font-semibold text-slate-700">Material</label><input readOnly type="text" value={materialDesc} className="mt-1 block w-full px-4 py-2 bg-slate-100 border border-slate-200 rounded-lg text-slate-500" placeholder="Auto-filled" /></div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div><label className="block text-sm font-semibold text-slate-700">Qty Recd</label><input required type="number" step="any" value={receivedQty} onChange={(e) => setReceivedQty(e.target.value)} className="mt-1 block w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-orange-500" placeholder="0" /></div>
-                  <div><label className="block text-sm font-semibold text-slate-700">Challan No.</label><input type="text" value={challanNumber} onChange={(e) => setChallanNumber(e.target.value)} className="mt-1 block w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-orange-500" placeholder="Opt." /></div>
-                </div>
-                <div><label className="block text-sm font-semibold text-slate-700">Vehicle / Truck No.</label><input required type="text" value={vehicleNumber} onChange={(e) => setVehicleNumber(e.target.value)} className="mt-1 block w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-orange-500" placeholder="e.g. BR-01-XX-1234" /></div>
-                <button disabled={savingGRN} type="submit" className="w-full mt-4 bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2">
-                  <FileText size={18} /> {savingGRN ? "Saving..." : "Generate GRN"}
-                </button>
-              </form>
-            </div>
-            
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 lg:col-span-2 overflow-x-auto">
-              <h2 className="text-lg font-bold text-slate-800 mb-4">Inward Truck History (GRNs)</h2>
-              <table className="w-full text-left border-collapse min-w-[750px]">
+          {/* GRN Register Table */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="px-6 py-3 bg-slate-900 text-white text-sm font-semibold">Verified GRN Register</div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-sm">
                 <thead>
-                  <tr className="bg-slate-100 text-slate-600 text-sm">
-                    <th className="p-3 rounded-l-lg font-semibold">GRN & PO</th>
-                    <th className="p-3 font-semibold">Site Location</th>
-                    <th className="p-3 font-semibold">Material & Truck</th>
-                    <th className="p-3 rounded-r-lg font-semibold text-right">Qty</th>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-xs uppercase text-slate-500 font-semibold">
+                    <th className="py-3 px-4">GRN No.</th>
+                    <th className="py-3 px-4">Against PO</th>
+                    <th className="py-3 px-4">Vehicle & Challan</th>
+                    <th className="py-3 px-4">Material & Qty</th>
+                    <th className="py-3 px-4">GRN Value</th>
+                    <th className="py-3 px-4">QC Status</th>
                   </tr>
                 </thead>
-                <tbody>
-                  {grnList.map(item => (
-                    <tr key={item.id} className="border-b border-slate-50 hover:bg-slate-50 text-sm">
-                      <td className="p-3"><span className="font-mono font-bold text-slate-700 bg-slate-100 px-2 py-1 rounded">{item.grn_number}</span><p className="text-xs text-slate-500 mt-1">PO: {item.po_number}</p></td>
-                      <td className="p-3 font-bold text-slate-800">{item.project_name}</td>
-                      <td className="p-3"><p className="font-medium text-slate-700">{item.material_desc}</p><p className="text-xs text-slate-500 flex items-center gap-1 mt-1"><Truck size={12}/> {item.vehicle_number}</p></td>
-                      <td className="p-3 font-black text-orange-600 text-right text-lg">{item.received_qty}</td>
+                <tbody className="divide-y divide-slate-100">
+                  {grnHistory.map((g) => (
+                    <tr key={g.id} className="hover:bg-slate-50">
+                      <td className="py-3 px-4 font-bold text-slate-900">{g.grn_number}</td>
+                      <td className="py-3 px-4 font-medium text-blue-700">{g.purchase_orders?.po_number || 'PO'}</td>
+                      <td className="py-3 px-4 text-xs">
+                        <div className="font-bold text-slate-800">{g.vehicle_number}</div>
+                        <div className="text-slate-500">Challan: {g.challan_number}</div>
+                      </td>
+                      <td className="py-3 px-4 font-semibold">{g.material_name} — {g.received_qty} {g.unit}</td>
+                      <td className="py-3 px-4 font-bold text-slate-900">{formatINR(g.grn_value)}</td>
+                      <td className="py-3 px-4">
+                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
+                          <CheckCircle2 className="w-3 h-3" /> {g.qc_status}
+                        </span>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-      </div>
+      {/* TAB 2: CONTRACTOR MATERIAL ISSUE */}
+      {activeTab === 'ISSUE' && (
+        <div className="space-y-6">
+          <form onSubmit={handleMaterialIssue} className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
+            <div className="font-bold text-sm text-slate-800 border-b border-slate-100 pb-2">
+              Issue Material to Site / Sub-Contractor (Auto-Recovery Enabled)
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Select Available Store Stock*</label>
+                <select
+                  value={selectedStockId || ''}
+                  onChange={(e) => setSelectedStockId(Number(e.target.value))}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-medium"
+                >
+                  {stockList.length === 0 && <option value="">No stock in store (Create GRN first)</option>}
+                  {stockList.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.material_name} (Available: {s.current_balance} {s.unit})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">
+                  Issue Quantity ({activeStock?.unit || 'Unit'})*
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  placeholder="Enter Qty"
+                  value={issueQty}
+                  onChange={(e) => setIssueQty(e.target.value)}
+                  className={`w-full border rounded-lg px-3 py-2 text-sm font-bold ${
+                    numIssueQty > 0 && isStockInsufficient ? 'border-red-500 bg-red-50' : 'border-slate-300'
+                  }`}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Accounting / Recovery Rule*</label>
+                <select
+                  value={issueType}
+                  onChange={(e) => setIssueType(e.target.value as 'FREE_ISSUE' | 'CHARGEABLE_RECOVERY')}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-semibold"
+                >
+                  <option value="FREE_ISSUE">Free Issue (Company Scope / BOQ)</option>
+                  <option value="CHARGEABLE_RECOVERY">Chargeable (Deduct from Contractor RA Bill)</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Sub-Contractor / Site Engineer Name*</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g., M/s Maa Tara Civil Contractors"
+                  value={contractorName}
+                  onChange={(e) => setContractorName(e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Consumption WBS Location</label>
+                <select
+                  value={wbsLocation}
+                  onChange={(e) => setWbsLocation(e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                >
+                  <option value="WBS-1.0 Sub-Structure">WBS-1.0 Sub-Structure</option>
+                  <option value="WBS-2.0 Super-Structure">WBS-2.0 Super-Structure</option>
+                  <option value="WBS-3.0 Masonry & Plaster">WBS-3.0 Masonry & Plaster</option>
+                  <option value="WBS-5.0 Finishing & Infra">WBS-5.0 Finishing & Infra</option>
+                </select>
+              </div>
+            </div>
+
+            {issueType === 'CHARGEABLE_RECOVERY' && activeStock && numIssueQty > 0 && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900 font-semibold flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-600" />
+                RECOVERY ALERT: {formatINR(numIssueQty * (activeStock.avg_rate || 0))} will be flagged for automatic deduction from {contractorName || 'Contractor'}'s next RA Bill.
+              </div>
+            )}
+
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                disabled={submittingIssue || !activeStock || isStockInsufficient}
+                className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-lg disabled:opacity-50"
+              >
+                {submittingIssue ? 'Issuing Slip...' : 'Generate Material Issue Slip'}
+              </button>
+            </div>
+          </form>
+
+          {/* Material Issue Register */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="px-6 py-3 bg-slate-900 text-white text-sm font-semibold">Material Issue & Recovery Register</div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-sm">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-xs uppercase text-slate-500 font-semibold">
+                    <th className="py-3 px-4">Slip No.</th>
+                    <th className="py-3 px-4">Contractor / Receiver</th>
+                    <th className="py-3 px-4">Material & Qty</th>
+                    <th className="py-3 px-4">WBS Location</th>
+                    <th className="py-3 px-4">Issue Type</th>
+                    <th className="py-3 px-4">Recovery Value</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {issueHistory.map((iss) => (
+                    <tr key={iss.id} className="hover:bg-slate-50">
+                      <td className="py-3 px-4 font-bold text-slate-900">{iss.issue_slip_no}</td>
+                      <td className="py-3 px-4 font-medium">{iss.issued_to_contractor}</td>
+                      <td className="py-3 px-4 font-semibold">{iss.material_name} — {iss.issued_qty} {iss.unit}</td>
+                      <td className="py-3 px-4 text-xs text-slate-600">{iss.wbs_location}</td>
+                      <td className="py-3 px-4">
+                        {iss.issue_type === 'CHARGEABLE_RECOVERY' ? (
+                          <span className="text-xs font-bold text-red-700 bg-red-50 px-2 py-0.5 rounded border border-red-200">
+                            Chargeable Recovery
+                          </span>
+                        ) : (
+                          <span className="text-xs font-medium text-slate-700 bg-slate-100 px-2 py-0.5 rounded">
+                            Free Issue (BOQ)
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 font-bold text-slate-900">
+                        {iss.issue_type === 'CHARGEABLE_RECOVERY' ? formatINR(iss.recovery_amount) : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: LIVE CENTRAL STORE STOCK */}
+      {activeTab === 'STOCK' && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-6 py-3 bg-slate-900 text-white text-sm font-semibold">
+            Live Central Store Stock Ledger (Zero-Negative Balance Enforced)
+          </div>
+          <div className="overflow-x-auto">
+            {loading ? (
+              <div className="p-8 text-center text-sm text-slate-500">Loading Stock Ledger...</div>
+            ) : stockList.length === 0 ? (
+              <div className="p-8 text-center text-sm text-slate-500">Store mein abhi koi stock nahi hai. Pehle Gate Entry & GRN banayein.</div>
+            ) : (
+              <table className="w-full text-left border-collapse text-sm">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-xs uppercase text-slate-500 font-semibold">
+                    <th className="py-3 px-4">Material Description</th>
+                    <th className="py-3 px-4">Total Received (GRN)</th>
+                    <th className="py-3 px-4">Total Issued</th>
+                    <th className="py-3 px-4">Current Closing Stock</th>
+                    <th className="py-3 px-4">Weighted Rate</th>
+                    <th className="py-3 px-4">Closing Valuation</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {stockList.map((s) => (
+                    <tr key={s.id} className="hover:bg-slate-50">
+                      <td className="py-3 px-4 font-bold text-slate-900">{s.material_name}</td>
+                      <td className="py-3 px-4 text-emerald-700 font-medium">{s.total_received} {s.unit}</td>
+                      <td className="py-3 px-4 text-amber-700 font-medium">{s.total_issued} {s.unit}</td>
+                      <td className="py-3 px-4 font-bold text-blue-700 text-base">{s.current_balance} {s.unit}</td>
+                      <td className="py-3 px-4 text-slate-600">{formatINR(s.avg_rate)}</td>
+                      <td className="py-3 px-4 font-bold text-slate-900">{formatINR(s.current_balance * s.avg_rate)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
