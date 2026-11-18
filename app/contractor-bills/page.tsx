@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import React, { useEffect, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
@@ -14,8 +14,8 @@ import {
 } from 'lucide-react';
 
 const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  (process.env.NEXT_PUBLIC_SUPABASE_URL || "https://jvorxidiigvdznnpgxrj.supabase.co"),
+  (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "public-anon-key")
 );
 
 interface ContractorMBBill {
@@ -161,7 +161,7 @@ export default function ContractorBillingPage() {
       <div className="mb-6 flex flex-col justify-between gap-4 border-b border-slate-200 pb-5 md:flex-row md:items-center">
         <div>
           <span className="text-xs font-bold tracking-wider text-blue-700 uppercase">
-            Universal Engicon Pvt. Ltd. • Site QS &amp; Billing
+            Universal Engicon Pvt. Ltd. â€¢ Site QS &amp; Billing
           </span>
           <h1 className="text-2xl font-extrabold text-slate-900">
             Contractor Measurement Book (MB) &amp; RA Billing
@@ -180,7 +180,7 @@ export default function ContractorBillingPage() {
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <p className="text-xs font-medium text-slate-500">Gross Work Certified</p>
           <p className="mt-1 text-2xl font-bold text-slate-900">
-            ₹ {totalGrossCertified.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+            â‚¹ {totalGrossCertified.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
           </p>
           <span className="text-xs text-slate-400">Cumulative MB Value (Excl. GST)</span>
         </div>
@@ -188,7 +188,7 @@ export default function ContractorBillingPage() {
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <p className="text-xs font-medium text-slate-500">Retention Money Held</p>
           <p className="mt-1 text-2xl font-bold text-amber-600">
-            ₹ {totalRetentionHeld.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+            â‚¹ {totalRetentionHeld.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
           </p>
           <span className="text-xs text-slate-400">Defect Liability Security Deposit</span>
         </div>
@@ -196,7 +196,7 @@ export default function ContractorBillingPage() {
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <p className="text-xs font-medium text-slate-500">Sec 194C TDS Deducted</p>
           <p className="mt-1 text-2xl font-bold text-blue-700">
-            ₹ {totalTdsDeducted.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+            â‚¹ {totalTdsDeducted.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
           </p>
           <span className="text-xs text-slate-400">1% Individual / 2% Company</span>
         </div>
@@ -204,7 +204,7 @@ export default function ContractorBillingPage() {
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <p className="text-xs font-medium text-slate-500">Pending Net Disbursement</p>
           <p className="mt-1 text-2xl font-bold text-emerald-700">
-            ₹ {totalNetPayable.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+            â‚¹ {totalNetPayable.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
           </p>
           <span className="text-xs text-slate-400">After Retention, TDS &amp; +GST</span>
         </div>
@@ -223,11 +223,11 @@ export default function ContractorBillingPage() {
                 <th className="px-4 py-3">RA Bill &amp; Contractor</th>
                 <th className="px-4 py-3">Project &amp; Work Item</th>
                 <th className="px-4 py-3 text-right">MB Qty (Prev + Curr = Cum)</th>
-                <th className="px-4 py-3 text-right">Gross Value (₹)</th>
+                <th className="px-4 py-3 text-right">Gross Value (â‚¹)</th>
                 <th className="px-4 py-3 text-right">Retention Held</th>
                 <th className="px-4 py-3 text-right">194C TDS</th>
                 <th className="px-4 py-3 text-right">GST (+)</th>
-                <th className="px-4 py-3 text-right">Net Payable (₹)</th>
+                <th className="px-4 py-3 text-right">Net Payable (â‚¹)</th>
                 <th className="px-4 py-3">QS / MD Approval</th>
               </tr>
             </thead>
@@ -253,7 +253,7 @@ export default function ContractorBillingPage() {
                       <div className="text-xs font-bold text-blue-700">{bill.projects?.name || 'General'}</div>
                       <div className="text-xs text-slate-700">{bill.work_description}</div>
                       <div className="text-[11px] text-slate-400">
-                        Rate: ₹{Number(bill.boq_rate).toLocaleString('en-IN')} / {bill.unit}
+                        Rate: â‚¹{Number(bill.boq_rate).toLocaleString('en-IN')} / {bill.unit}
                       </div>
                     </td>
 
@@ -268,12 +268,12 @@ export default function ContractorBillingPage() {
                     </td>
 
                     <td className="px-4 py-3 text-right font-mono font-semibold">
-                      ₹ {Number(bill.gross_current_amount).toLocaleString('en-IN')}
+                      â‚¹ {Number(bill.gross_current_amount).toLocaleString('en-IN')}
                     </td>
 
                     <td className="px-4 py-3 text-right">
                       <div className="font-mono text-xs font-bold text-amber-700">
-                        - ₹ {Number(bill.retention_amount).toLocaleString('en-IN')} ({bill.retention_percent}%)
+                        - â‚¹ {Number(bill.retention_amount).toLocaleString('en-IN')} ({bill.retention_percent}%)
                       </div>
                       <button
                         onClick={() => toggleRetentionRelease(bill.id, bill.retention_released)}
@@ -296,17 +296,17 @@ export default function ContractorBillingPage() {
                     </td>
 
                     <td className="px-4 py-3 text-right font-mono text-xs text-rose-600">
-                      - ₹ {Number(bill.tds_amount).toLocaleString('en-IN')}
+                      - â‚¹ {Number(bill.tds_amount).toLocaleString('en-IN')}
                       <div className="text-[10px] text-slate-400">({bill.tds_percent}%)</div>
                     </td>
 
                     <td className="px-4 py-3 text-right font-mono text-xs text-slate-600">
-                      + ₹ {Number(bill.gst_amount).toLocaleString('en-IN')}
+                      + â‚¹ {Number(bill.gst_amount).toLocaleString('en-IN')}
                       <div className="text-[10px] text-slate-400">({bill.gst_percent}%)</div>
                     </td>
 
                     <td className="px-4 py-3 text-right font-mono text-sm font-extrabold text-emerald-700">
-                      ₹ {Number(bill.net_payable_amount).toLocaleString('en-IN')}
+                      â‚¹ {Number(bill.net_payable_amount).toLocaleString('en-IN')}
                     </td>
 
                     <td className="px-4 py-3">
@@ -440,7 +440,7 @@ export default function ContractorBillingPage() {
               </div>
 
               <div>
-                <label className="mb-1 block font-semibold">Approved BOQ Rate (₹) *</label>
+                <label className="mb-1 block font-semibold">Approved BOQ Rate (â‚¹) *</label>
                 <input
                   type="number"
                   step="0.01"
@@ -522,24 +522,24 @@ export default function ContractorBillingPage() {
               </div>
               <div className="grid grid-cols-2 gap-1.5">
                 <span className="text-slate-600">Gross Current Work Value:</span>
-                <span className="text-right font-mono font-bold">₹ {liveGross.toLocaleString('en-IN')}</span>
+                <span className="text-right font-mono font-bold">â‚¹ {liveGross.toLocaleString('en-IN')}</span>
 
                 <span className="text-slate-600">Add: GST ({formData.gst_percent}%):</span>
-                <span className="text-right font-mono text-blue-700">+ ₹ {liveGst.toLocaleString('en-IN')}</span>
+                <span className="text-right font-mono text-blue-700">+ â‚¹ {liveGst.toLocaleString('en-IN')}</span>
 
                 <span className="text-amber-700">Less: Retention Held ({formData.retention_percent}%):</span>
                 <span className="text-right font-mono text-amber-700">
-                  - ₹ {liveRetention.toLocaleString('en-IN')}
+                  - â‚¹ {liveRetention.toLocaleString('en-IN')}
                 </span>
 
                 <span className="text-rose-700">Less: Sec 194C TDS ({formData.tds_percent}%):</span>
-                <span className="text-right font-mono text-rose-700">- ₹ {liveTds.toLocaleString('en-IN')}</span>
+                <span className="text-right font-mono text-rose-700">- â‚¹ {liveTds.toLocaleString('en-IN')}</span>
 
                 <span className="border-t pt-1.5 text-sm font-extrabold text-slate-900">
                   Net Payable to Contractor:
                 </span>
                 <span className="border-t pt-1.5 text-right font-mono text-sm font-extrabold text-emerald-700">
-                  ₹ {liveNetPayable.toLocaleString('en-IN')}
+                  â‚¹ {liveNetPayable.toLocaleString('en-IN')}
                 </span>
               </div>
             </div>
