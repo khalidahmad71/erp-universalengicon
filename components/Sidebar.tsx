@@ -103,7 +103,7 @@ export default function Sidebar() {
                 <p className="px-3 mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">
                   {section.title}
                 </p>
-                <div className="space-y-1">
+                <div className="space-y-2">
                   {visibleItems.map((item) => {
                     const Icon = item.icon
                     const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
@@ -111,13 +111,13 @@ export default function Sidebar() {
                       <Link
                         key={item.href}
                         href={item.href}
-                        className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                        className={`group flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-semibold border transition-all duration-200 ease-out transform ${
                           isActive
-                            ? 'bg-blue-600 text-white shadow-sm'
-                            : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                            ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-t-blue-300/70 border-l-blue-400/50 border-r-indigo-900 border-b-2 border-b-blue-950 shadow-[0_4px_12px_rgba(37,99,235,0.45),inset_0_1px_0_rgba(255,255,255,0.3)] -translate-y-0.5'
+                            : 'bg-slate-800/85 text-slate-200 border-t-slate-600/80 border-l-slate-700/70 border-r-slate-950 border-b-2 border-b-slate-950 shadow-[0_3px_6px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.14)] hover:bg-gradient-to-r hover:from-blue-600 hover:to-cyan-600 hover:text-white hover:border-t-cyan-300/70 hover:border-b-blue-950 hover:-translate-y-0.5 hover:scale-[1.02] hover:shadow-[0_6px_16px_rgba(14,165,233,0.4),inset_0_1px_0_rgba(255,255,255,0.35)] active:translate-y-0.5 active:scale-[0.99]'
                         }`}
                       >
-                        <Icon className="w-4 h-4 shrink-0" />
+                        <Icon className="w-4 h-4 shrink-0 transition-transform duration-200 group-hover:scale-110 group-hover:rotate-3" />
                         <span className="truncate">{item.name}</span>
                       </Link>
                     )
