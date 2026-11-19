@@ -75,12 +75,12 @@ export default function RootLayout({
                   <p className="mb-2 px-2 text-[10px] font-bold tracking-wider text-slate-400 uppercase">
                     {section}
                   </p>
-                  <div className="space-y-1">
+                  <div className="space-y-2">
                     {items.map((item) => (
                       <Link
                         key={item.href}
                         href={item.href}
-                        className="block rounded-lg px-3 py-2 text-xs font-medium text-slate-300 transition hover:bg-slate-800 hover:text-white"
+                        className="block w-full rounded-xl px-3.5 py-2.5 text-xs font-bold tracking-wide text-slate-100 bg-gradient-to-b from-slate-800 to-slate-900 border border-t-slate-600/80 border-l-slate-700/70 border-r-slate-950 border-b-2 border-b-slate-950 shadow-[0_3px_6px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.16)] transition-all duration-200 ease-out transform hover:from-blue-600 hover:to-cyan-600 hover:text-white hover:border-t-cyan-300/80 hover:border-b-blue-950 hover:-translate-y-0.5 hover:scale-[1.03] hover:shadow-[0_6px_16px_rgba(14,165,233,0.45),inset_0_1px_0_rgba(255,255,255,0.35)] active:translate-y-0.5 active:scale-[0.98]"
                       >
                         {item.name}
                       </Link>
