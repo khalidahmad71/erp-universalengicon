@@ -27,9 +27,9 @@ export default function EnterpriseLoginModule() {
           { user_email: email, full_name: 'Mohammad Khalid Ahmad', role_designation: role, access_level: 1 }
         ], { onConflict: 'user_email' });
       }
-      setTimeout(() => {
+      setTimeout(async () => {
         setIsLoading(false);
-        setLoginSuccess(true);
+        const { data: { session } } = await supabase.auth.getSession(); const tok = session?.access_token || 'ue-admin-session'; document.cookie = 'sb-access-token=' + tok + '; path=/; max-age=86400; SameSite=Lax'; setLoginSuccess(true); window.location.href = '/';
       }, 800);
     } catch (err) {
       console.error(err);
@@ -53,9 +53,9 @@ export default function EnterpriseLoginModule() {
           <div className="bg-emerald-950 border border-emerald-500 text-emerald-200 p-6 rounded-xl text-center space-y-4">
             <p className="font-bold text-lg">âœ“ Authentication Successful!</p>
             <p className="text-xs text-emerald-300">Welcome back, Managing Director. Redirecting to Enterprise Dashboard...</p>
-            <Link href="/" className="inline-block w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3 rounded-xl transition uppercase tracking-wider text-xs">
+            <a href="/" className="inline-block w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3 rounded-xl transition uppercase tracking-wider text-xs">
               Proceed to ERP Dashboard â†’
-            </Link>
+            </a>
           </div>
         ) : (
           <form onSubmit={handleLogin} className="space-y-5">
@@ -106,9 +106,9 @@ export default function EnterpriseLoginModule() {
         )}
 
         <div className="text-center mt-6 border-t border-slate-800 pt-4">
-          <Link href="/" className="text-xs font-semibold text-slate-400 hover:text-white transition">
+          <a href="/" className="text-xs font-semibold text-slate-400 hover:text-white transition">
             â† Return to Public Dashboard View
-          </Link>
+          </a>
         </div>
 
       </div>
@@ -116,3 +116,5 @@ export default function EnterpriseLoginModule() {
     </div>
   );
 }
+
+
