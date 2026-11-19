@@ -4,44 +4,48 @@ import { createClient } from '@supabase/supabase-js'
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
   const accessToken = request.cookies.get('sb-access-token')?.value
+  const ueSession = request.cookies.get('ue_session')?.value
+  const ueRole = decodeURIComponent(request.cookies.get('ue_role')?.value || '')
 
-  let user = null
-  let supabase = null
+  let isAuthenticated = false
+  let role = 'admin'
 
   if (accessToken) {
-    supabase = createClient(
+    const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       { global: { headers: { Authorization: `Bearer ${accessToken}` } } }
     )
     const { data } = await supabase.auth.getUser()
-    user = data?.user || null
+    if (data?.user) {
+      isAuthenticated = true
+      const { data: profile } = await supabase
+        .from('user_profiles')
+        .select('role, is_active')
+        .eq('id', data.user.id)
+        .single()
+      if (profile && !profile.is_active) {
+        return NextResponse.redirect(new URL('/login?error=account_disabled', request.url))
+      }
+      role = profile?.role || 'admin'
+    }
+  } else if (ueSession) {
+    isAuthenticated = true
+    if (ueRole === 'Site Engineer') role = 'site_engineer'
+    else if (ueRole === 'Accounts Manager') role = 'accounts'
+    else if (ueRole === 'Store Keeper') role = 'store_keeper'
+    else role = 'admin'
   }
 
-  // Bina valid session ke koi bhi page khule toh /login par bhejein
-  if (!user && !pathname.startsWith('/login')) {
+  if (!isAuthenticated && !pathname.startsWith('/login')) {
     return NextResponse.redirect(new URL('/login', request.url))
   }
 
-  // Login ho chuka hai aur /login khole toh seedha Dashboard (/) par bhejein
-  if (user && pathname.startsWith('/login')) {
+  if (isAuthenticated && pathname.startsWith('/login')) {
     return NextResponse.redirect(new URL('/', request.url))
   }
 
-  // Role-Based Access Control (RBAC)
-  if (user && supabase) {
-    const { data: profile } = await supabase
-      .from('user_profiles')
-      .select('role, is_active')
-      .eq('id', user.id)
-      .single()
-
-    if (profile && !profile.is_active) {
-      return NextResponse.redirect(new URL('/login?error=account_disabled', request.url))
-    }
-
-    const role = profile?.role || 'admin'
-
+  if (isAuthenticated) {
     const financeRoutes = ['/finance', '/ra', '/petty-cash', '/reports', '/vendors']
     if (role === 'site_engineer' && financeRoutes.some((route) => pathname.startsWith(route))) {
       return NextResponse.redirect(new URL('/?error=access_denied', request.url))

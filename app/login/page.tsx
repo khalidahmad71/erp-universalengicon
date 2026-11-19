@@ -29,7 +29,7 @@ export default function EnterpriseLoginModule() {
       }
       setTimeout(async () => {
         setIsLoading(false);
-        const { data: { session } } = await supabase.auth.getSession(); const tok = session?.access_token || 'ue-admin-session'; document.cookie = 'sb-access-token=' + tok + '; path=/; max-age=86400; SameSite=Lax'; setLoginSuccess(true); window.location.href = '/';
+        const { data: { session } } = await supabase.auth.getSession(); document.cookie = 'ue_session=' + encodeURIComponent(email) + '; path=/; max-age=86400; SameSite=Lax'; document.cookie = 'ue_role=' + encodeURIComponent(role) + '; path=/; max-age=86400; SameSite=Lax'; setLoginSuccess(true); window.location.href = '/';
       }, 800);
     } catch (err) {
       console.error(err);
@@ -116,5 +116,6 @@ export default function EnterpriseLoginModule() {
     </div>
   );
 }
+
 
 
