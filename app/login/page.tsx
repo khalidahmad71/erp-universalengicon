@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import React, { useState } from 'react';
 import Link from 'next/link';
@@ -11,7 +11,7 @@ try { if (supabaseUrl && supabaseKey) { supabase = createClient(supabaseUrl, sup
 
 export default function EnterpriseLoginModule() {
   const [email, setEmail] = useState('md@universalengicon.com');
-  const [password, setPassword] = useState('••••••••••••');
+  const [password, setPassword] = useState('â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢');
   const [role, setRole] = useState('Managing Director');
   const [isLoading, setIsLoading] = useState(false);
   const [loginSuccess, setLoginSuccess] = useState(false);
@@ -51,10 +51,10 @@ export default function EnterpriseLoginModule() {
 
         {loginSuccess ? (
           <div className="bg-emerald-950 border border-emerald-500 text-emerald-200 p-6 rounded-xl text-center space-y-4">
-            <p className="font-bold text-lg">✓ Authentication Successful!</p>
+            <p className="font-bold text-lg">âœ“ Authentication Successful!</p>
             <p className="text-xs text-emerald-300">Welcome back, Managing Director. Redirecting to Enterprise Dashboard...</p>
             <Link href="/" className="inline-block w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3 rounded-xl transition uppercase tracking-wider text-xs">
-              Proceed to ERP Dashboard →
+              Proceed to ERP Dashboard â†’
             </Link>
           </div>
         ) : (
@@ -100,14 +100,14 @@ export default function EnterpriseLoginModule() {
               disabled={isLoading} 
               className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-4 rounded-xl shadow-lg transition uppercase tracking-wider text-sm mt-2"
             >
-              {isLoading ? 'Verifying Credentials...' : '🔐 Secure Login to ERP'}
+              {isLoading ? 'Verifying Credentials...' : 'ðŸ” Secure Login to ERP'}
             </button>
           </form>
         )}
 
         <div className="text-center mt-6 border-t border-slate-800 pt-4">
           <Link href="/" className="text-xs font-semibold text-slate-400 hover:text-white transition">
-            ← Return to Public Dashboard View
+            â† Return to Public Dashboard View
           </Link>
         </div>
 
