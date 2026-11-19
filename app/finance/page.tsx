@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { useEffect, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
@@ -186,7 +186,7 @@ export default function EnterpriseFinancePage() {
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <p className="text-xs font-medium text-slate-500">Eligible Input ITC (GST)</p>
           <p className="mt-1 text-2xl font-bold text-blue-700">
-            â‚¹ {totalInputITC.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+            ₹ {totalInputITC.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
           </p>
           <span className="text-xs text-slate-400">Only from 3-way matched bills</span>
         </div>
@@ -194,7 +194,7 @@ export default function EnterpriseFinancePage() {
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <p className="text-xs font-medium text-slate-500">Net GST Liability</p>
           <p className={`mt-1 text-2xl font-bold ${netGstPayable > 0 ? 'text-amber-600' : 'text-emerald-700'}`}>
-            â‚¹ {Math.abs(netGstPayable).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+            ₹ {Math.abs(netGstPayable).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
           </p>
           <span className="text-xs text-slate-400">
             {netGstPayable > 0 ? 'Net Cash Payable' : 'Excess ITC Credit Balance'}
@@ -248,9 +248,9 @@ export default function EnterpriseFinancePage() {
                   <tr>
                     <th className="px-4 py-3">Bill No &amp; Vendor</th>
                     <th className="px-4 py-3">Project</th>
-                    <th className="px-4 py-3 text-right">PO Value (â‚¹)</th>
-                    <th className="px-4 py-3 text-right">Store GRN (â‚¹)</th>
-                    <th className="px-4 py-3 text-right">Vendor Bill (â‚¹)</th>
+                    <th className="px-4 py-3 text-right">PO Value (₹)</th>
+                    <th className="px-4 py-3 text-right">Store GRN (₹)</th>
+                    <th className="px-4 py-3 text-right">Vendor Bill (₹)</th>
                     <th className="px-4 py-3">3-Way Audit Status</th>
                     <th className="px-4 py-3 text-right">Action</th>
                   </tr>
@@ -335,7 +335,7 @@ export default function EnterpriseFinancePage() {
                           <span className="ml-2 text-xs text-slate-400">({b.bill_number})</span>
                         </div>
                         <span className="font-mono font-bold text-emerald-700">
-                          + â‚¹ {(Number(b.cgst_amount) + Number(b.sgst_amount)).toLocaleString('en-IN')}
+                          + ₹ {(Number(b.cgst_amount) + Number(b.sgst_amount)).toLocaleString('en-IN')}
                         </span>
                       </div>
                     ))}
@@ -351,7 +351,7 @@ export default function EnterpriseFinancePage() {
                     <div key={p.project_id} className="flex justify-between border-b border-slate-100 py-2">
                       <span className="font-semibold">{p.project_name}</span>
                       <span className="font-mono font-bold text-amber-700">
-                        - â‚¹ {(Number(p.certified_revenue) * 0.18).toLocaleString('en-IN')}
+                        - ₹ {(Number(p.certified_revenue) * 0.18).toLocaleString('en-IN')}
                       </span>
                     </div>
                   ))}
@@ -366,10 +366,10 @@ export default function EnterpriseFinancePage() {
                 <thead className="bg-slate-100 text-xs font-bold text-slate-600 uppercase">
                   <tr>
                     <th className="px-4 py-3">Project Name</th>
-                    <th className="px-4 py-3 text-right">Contract Value (â‚¹)</th>
-                    <th className="px-4 py-3 text-right">Certified RA Revenue (â‚¹)</th>
-                    <th className="px-4 py-3 text-right">Verified Material/Vendor Cost (â‚¹)</th>
-                    <th className="px-4 py-3 text-right">Net Operating Profit (â‚¹)</th>
+                    <th className="px-4 py-3 text-right">Contract Value (₹)</th>
+                    <th className="px-4 py-3 text-right">Certified RA Revenue (₹)</th>
+                    <th className="px-4 py-3 text-right">Verified Material/Vendor Cost (₹)</th>
+                    <th className="px-4 py-3 text-right">Net Operating Profit (₹)</th>
                     <th className="px-4 py-3 text-right">Margin %</th>
                   </tr>
                 </thead>
@@ -461,7 +461,7 @@ export default function EnterpriseFinancePage() {
                 />
               </div>
               <div>
-                <label className="mb-1 block font-semibold">PO Taxable Value (â‚¹)</label>
+                <label className="mb-1 block font-semibold">PO Taxable Value (₹)</label>
                 <input
                   type="number"
                   required
@@ -471,7 +471,7 @@ export default function EnterpriseFinancePage() {
                 />
               </div>
               <div>
-                <label className="mb-1 block font-semibold">Store GRN Verified (â‚¹)</label>
+                <label className="mb-1 block font-semibold">Store GRN Verified (₹)</label>
                 <input
                   type="number"
                   required
@@ -482,7 +482,7 @@ export default function EnterpriseFinancePage() {
               </div>
               <div className="col-span-2">
                 <label className="mb-1 block font-semibold text-blue-800">
-                  Vendor Billed Taxable Amount (â‚¹)
+                  Vendor Billed Taxable Amount (₹)
                 </label>
                 <input
                   type="number"

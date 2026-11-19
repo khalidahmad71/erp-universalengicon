@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { useEffect, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
@@ -180,7 +180,7 @@ export default function ExecutiveMISAnalyticsPage() {
             <Building2 className="h-4 w-4 text-blue-700" />
           </div>
           <p className="mt-2 text-2xl font-extrabold text-slate-900">
-            â‚¹ {totalContractPortfolio.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+            ₹ {totalContractPortfolio.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
           </p>
           <span className="text-xs text-slate-400">{projects.length} Active Civil &amp; Real Estate Sites</span>
         </div>
@@ -191,10 +191,10 @@ export default function ExecutiveMISAnalyticsPage() {
             <ArrowUpRight className="h-4 w-4 text-emerald-600" />
           </div>
           <p className="mt-2 text-2xl font-extrabold text-emerald-700">
-            â‚¹ {totalRevenueInflow.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+            ₹ {totalRevenueInflow.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
           </p>
           <span className="text-xs text-slate-400">
-            RA Bills: â‚¹{raRevenueTotal.toLocaleString('en-IN')} | Sales: â‚¹{realEstateCollections.toLocaleString('en-IN')}
+            RA Bills: ₹{raRevenueTotal.toLocaleString('en-IN')} | Sales: ₹{realEstateCollections.toLocaleString('en-IN')}
           </span>
         </div>
 
@@ -204,7 +204,7 @@ export default function ExecutiveMISAnalyticsPage() {
             <ArrowDownRight className="h-4 w-4 text-rose-600" />
           </div>
           <p className="mt-2 text-2xl font-extrabold text-rose-700">
-            â‚¹ {totalDirectCost.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+            ₹ {totalDirectCost.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
           </p>
           <span className="text-xs text-slate-400">Material + Contractor MB + Site Cash</span>
         </div>
@@ -219,7 +219,7 @@ export default function ExecutiveMISAnalyticsPage() {
               netOperatingSurplus >= 0 ? 'text-blue-700' : 'text-amber-600'
             }`}
           >
-            â‚¹ {netOperatingSurplus.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+            ₹ {netOperatingSurplus.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
           </p>
           <span className="text-xs text-slate-400">Live Project Cash Position</span>
         </div>
@@ -265,7 +265,7 @@ export default function ExecutiveMISAnalyticsPage() {
                 <span className="font-semibold text-slate-700">3-Way Matched Material &amp; Vendors</span>
               </div>
               <div className="font-mono font-bold text-slate-900">
-                â‚¹ {matchedMaterialCost.toLocaleString('en-IN')}{' '}
+                ₹ {matchedMaterialCost.toLocaleString('en-IN')}{' '}
                 <span className="text-xs text-slate-400">({materialPct}%)</span>
               </div>
             </div>
@@ -276,7 +276,7 @@ export default function ExecutiveMISAnalyticsPage() {
                 <span className="font-semibold text-slate-700">Contractor MB Certified Work</span>
               </div>
               <div className="font-mono font-bold text-slate-900">
-                â‚¹ {certifiedContractorCost.toLocaleString('en-IN')}{' '}
+                ₹ {certifiedContractorCost.toLocaleString('en-IN')}{' '}
                 <span className="text-xs text-slate-400">({contractorPct}%)</span>
               </div>
             </div>
@@ -287,7 +287,7 @@ export default function ExecutiveMISAnalyticsPage() {
                 <span className="font-semibold text-slate-700">Approved Site Petty Cash</span>
               </div>
               <div className="font-mono font-bold text-slate-900">
-                â‚¹ {approvedPettyCashExpense.toLocaleString('en-IN')}{' '}
+                ₹ {approvedPettyCashExpense.toLocaleString('en-IN')}{' '}
                 <span className="text-xs text-slate-400">({pettyCashPct}%)</span>
               </div>
             </div>
@@ -311,7 +311,7 @@ export default function ExecutiveMISAnalyticsPage() {
                   <div className="mb-1 flex justify-between text-xs">
                     <span className="font-semibold text-slate-700">{item.category}</span>
                     <span className="font-mono font-bold text-slate-900">
-                      â‚¹ {item.amount.toLocaleString('en-IN')}
+                      ₹ {item.amount.toLocaleString('en-IN')}
                     </span>
                   </div>
                   <div className="h-2.5 w-full rounded-full bg-slate-100">
@@ -334,7 +334,7 @@ export default function ExecutiveMISAnalyticsPage() {
             <ShieldCheck className="h-4 w-4" /> Leakage Prevented (3-Way Hold)
           </div>
           <p className="mt-1 font-mono text-xl font-extrabold text-rose-700">
-            â‚¹ {blockedVendorHold.toLocaleString('en-IN')}
+            ₹ {blockedVendorHold.toLocaleString('en-IN')}
           </p>
           <p className="mt-0.5 text-xs text-rose-600">Over-billed or unverified vendor invoices blocked</p>
         </div>
@@ -344,7 +344,7 @@ export default function ExecutiveMISAnalyticsPage() {
             <Receipt className="h-4 w-4" /> Contractor Retention Security Held
           </div>
           <p className="mt-1 font-mono text-xl font-extrabold text-amber-700">
-            â‚¹ {totalRetentionReserve.toLocaleString('en-IN')}
+            ₹ {totalRetentionReserve.toLocaleString('en-IN')}
           </p>
           <p className="mt-0.5 text-xs text-amber-700">DLP guarantee reserve locked from RA bills</p>
         </div>
@@ -354,10 +354,10 @@ export default function ExecutiveMISAnalyticsPage() {
             <IndianRupee className="h-4 w-4" /> Statutory 194C TDS &amp; Site Imprest
           </div>
           <p className="mt-1 font-mono text-xl font-extrabold text-blue-800">
-            TDS: â‚¹ {totalTdsLiability.toLocaleString('en-IN')}
+            TDS: ₹ {totalTdsLiability.toLocaleString('en-IN')}
           </p>
           <p className="mt-0.5 text-xs text-blue-700">
-            Site Cash-in-Hand: â‚¹ {(totalImprestIssued - approvedPettyCashExpense).toLocaleString('en-IN')}
+            Site Cash-in-Hand: ₹ {(totalImprestIssued - approvedPettyCashExpense).toLocaleString('en-IN')}
           </p>
         </div>
       </div>
@@ -372,11 +372,11 @@ export default function ExecutiveMISAnalyticsPage() {
           <thead className="bg-slate-100 text-xs font-bold text-slate-600 uppercase">
             <tr>
               <th className="px-4 py-3">Site / Project Name</th>
-              <th className="px-4 py-3 text-right">Sanctioned Budget (â‚¹)</th>
-              <th className="px-4 py-3 text-right">Material Cost (â‚¹)</th>
-              <th className="px-4 py-3 text-right">Contractor MB (â‚¹)</th>
-              <th className="px-4 py-3 text-right">Petty Cash (â‚¹)</th>
-              <th className="px-4 py-3 text-right">Total Spend (â‚¹)</th>
+              <th className="px-4 py-3 text-right">Sanctioned Budget (₹)</th>
+              <th className="px-4 py-3 text-right">Material Cost (₹)</th>
+              <th className="px-4 py-3 text-right">Contractor MB (₹)</th>
+              <th className="px-4 py-3 text-right">Petty Cash (₹)</th>
+              <th className="px-4 py-3 text-right">Total Spend (₹)</th>
               <th className="px-4 py-3 text-right">Budget Utilized</th>
             </tr>
           </thead>
@@ -414,19 +414,19 @@ export default function ExecutiveMISAnalyticsPage() {
                   <tr key={proj.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3 font-bold text-slate-900">{proj.name}</td>
                     <td className="px-4 py-3 text-right font-mono">
-                      â‚¹ {budget.toLocaleString('en-IN')}
+                      ₹ {budget.toLocaleString('en-IN')}
                     </td>
                     <td className="px-4 py-3 text-right font-mono text-blue-700">
-                      â‚¹ {matCost.toLocaleString('en-IN')}
+                      ₹ {matCost.toLocaleString('en-IN')}
                     </td>
                     <td className="px-4 py-3 text-right font-mono text-amber-700">
-                      â‚¹ {conCost.toLocaleString('en-IN')}
+                      ₹ {conCost.toLocaleString('en-IN')}
                     </td>
                     <td className="px-4 py-3 text-right font-mono text-emerald-700">
-                      â‚¹ {cashCost.toLocaleString('en-IN')}
+                      ₹ {cashCost.toLocaleString('en-IN')}
                     </td>
                     <td className="px-4 py-3 text-right font-mono font-extrabold text-slate-900">
-                      â‚¹ {totalSpend.toLocaleString('en-IN')}
+                      ₹ {totalSpend.toLocaleString('en-IN')}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <span

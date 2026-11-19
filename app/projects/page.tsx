@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { useEffect, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
@@ -115,7 +115,7 @@ export default function ProjectsMasterPage() {
 
               <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3">
                 <span className="font-mono text-sm font-bold text-blue-700">
-                  â‚¹ {Number(proj.budget || 0).toLocaleString('en-IN')}
+                  ₹ {Number(proj.budget || 0).toLocaleString('en-IN')}
                 </span>
                 <button
                   onClick={() => handleDeleteProject(proj.id)}
@@ -156,7 +156,7 @@ export default function ProjectsMasterPage() {
                 />
               </div>
               <div>
-                <label className="mb-1 block font-semibold">Contract Budget (â‚¹) *</label>
+                <label className="mb-1 block font-semibold">Contract Budget (₹) *</label>
                 <input
                   type="number"
                   required

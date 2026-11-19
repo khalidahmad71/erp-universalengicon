@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { useEffect, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
@@ -151,7 +151,7 @@ export default function SitePettyCashPage() {
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <p className="text-xs font-medium text-slate-500">Total Imprest Issued (HO)</p>
           <p className="mt-1 text-2xl font-bold text-blue-700">
-            â‚¹ {totalImprestIssued.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+            ₹ {totalImprestIssued.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
           </p>
           <span className="text-xs text-slate-400">Cash given to Site Engineers</span>
         </div>
@@ -159,7 +159,7 @@ export default function SitePettyCashPage() {
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <p className="text-xs font-medium text-slate-500">Approved Site Expenses</p>
           <p className="mt-1 text-2xl font-bold text-rose-700">
-            â‚¹ {totalApprovedExpenses.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+            ₹ {totalApprovedExpenses.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
           </p>
           <span className="text-xs text-slate-400">Verified &amp; booked to Project</span>
         </div>
@@ -171,7 +171,7 @@ export default function SitePettyCashPage() {
               netSiteCashInHand >= 0 ? 'text-emerald-700' : 'text-rose-600'
             }`}
           >
-            â‚¹ {netSiteCashInHand.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+            ₹ {netSiteCashInHand.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
           </p>
           <span className="text-xs text-slate-400">Unspent Imprest Balance</span>
         </div>
@@ -179,7 +179,7 @@ export default function SitePettyCashPage() {
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <p className="text-xs font-medium text-slate-500">Pending MD Approval</p>
           <p className="mt-1 text-2xl font-bold text-amber-600">
-            â‚¹ {pendingApprovalsAmount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+            ₹ {pendingApprovalsAmount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
           </p>
           <span className="text-xs text-slate-400">Awaiting voucher audit</span>
         </div>
@@ -199,7 +199,7 @@ export default function SitePettyCashPage() {
                 <th className="px-4 py-3">Site / Project</th>
                 <th className="px-4 py-3">Type &amp; Category</th>
                 <th className="px-4 py-3">Particulars &amp; Payee</th>
-                <th className="px-4 py-3 text-right">Amount (â‚¹)</th>
+                <th className="px-4 py-3 text-right">Amount (₹)</th>
                 <th className="px-4 py-3">Audit Status</th>
                 <th className="px-4 py-3 text-right">MD Action</th>
               </tr>
@@ -250,7 +250,7 @@ export default function SitePettyCashPage() {
                           isInflow ? 'text-blue-700' : 'text-rose-700'
                         }`}
                       >
-                        {isInflow ? '+' : '-'} â‚¹ {Number(item.amount).toLocaleString('en-IN')}
+                        {isInflow ? '+' : '-'} ₹ {Number(item.amount).toLocaleString('en-IN')}
                       </td>
 
                       <td className="px-4 py-3">
@@ -417,7 +417,7 @@ export default function SitePettyCashPage() {
               </div>
 
               <div className="col-span-2">
-                <label className="mb-1 block font-semibold text-blue-800">Amount (â‚¹) *</label>
+                <label className="mb-1 block font-semibold text-blue-800">Amount (₹) *</label>
                 <input
                   type="number"
                   step="0.01"

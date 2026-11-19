@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -214,7 +214,7 @@ export default function MainDashboard() {
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-xs font-medium text-slate-500">Total Contract Value</p>
           <p className="mt-1 text-2xl font-bold text-blue-700">
-            â‚¹ {stats.totalBudget.toLocaleString('en-IN')}
+            ₹ {stats.totalBudget.toLocaleString('en-IN')}
           </p>
         </div>
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -264,7 +264,7 @@ export default function MainDashboard() {
                   </span>
                 </div>
                 <p className="mt-3 border-t border-slate-100 pt-2 font-mono text-sm font-semibold text-blue-700">
-                  Budget: â‚¹ {Number(proj.budget || 0).toLocaleString('en-IN')}
+                  Budget: ₹ {Number(proj.budget || 0).toLocaleString('en-IN')}
                 </p>
               </div>
             ))}
@@ -332,7 +332,7 @@ export default function MainDashboard() {
 
               <div>
                 <label className="mb-1 block font-semibold text-blue-800">
-                  Sanctioned Contract / Project Budget (â‚¹) *
+                  Sanctioned Contract / Project Budget (₹) *
                 </label>
                 <input
                   type="number"
