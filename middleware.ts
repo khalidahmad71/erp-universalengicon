@@ -6,7 +6,8 @@ export async function middleware(request: NextRequest) {
 
   // 1. Public login/auth routes aur home page allow karein
   if (pathname === '/' || pathname.startsWith('/login') || pathname.startsWith('/auth')) {
-    return NextResponse.next()
+    if (!user && !pathname.startsWith('/login')) { return NextResponse.redirect(new URL('/login', request.url)) }
+  return NextResponse.next()
   }
 
   // 2. Supabase auth cookie se access token nikaalein
@@ -66,6 +67,7 @@ export async function middleware(request: NextRequest) {
     }
   }
 
+  if (!user && !pathname.startsWith('/login')) { return NextResponse.redirect(new URL('/login', request.url)) }
   return NextResponse.next()
 }
 
