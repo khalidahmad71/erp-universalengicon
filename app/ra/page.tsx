@@ -1,389 +1,261 @@
-"use client";
+'use client';
 
-import { useEffect, useState } from "react";
-import Sidebar from "@/components/Sidebar";
-import { Building, FileText, Plus, X, Printer, CheckCircle, Clock } from "lucide-react";
-import { supabase } from "@/utils/supabase";
+import React, { useEffect, useState } from 'react';
+import { supabase } from '../lib/supabase';
+import OfficialPrintDocument from '../components/OfficialPrintDocument';
+import { Plus, Printer, Receipt, X } from 'lucide-react';
 
-interface ClientRABill {
-  id: string;
-  bill_no: string;
-  client_name: string;
-  unit_number: string;
-  work_description: string;
-  previous_billed_amount: number;
-  current_bill_amount: number;
-  gst_percentage: number;
-  status: string;
-  created_at: string;
-}
-
-export default function RABillsPage() {
+export default function ContractorRABillsPage() {
+  const [bills, setBills] = useState<any[]>([]);
+  const [projects, setProjects] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [bills, setBills] = useState<ClientRABill[]>([]);
-  const [showModal, setShowModal] = useState(false);
-  const [printingBill, setPrintingBill] = useState<ClientRABill | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [printBill, setPrintBill] = useState<any | null>(null);
 
-  // Form States
-  const [billNo, setBillNo] = useState(`RA-${Math.floor(1000 + Math.random() * 9000)}`);
-  const [clientName, setClientName] = useState("");
-  const [unitNumber, setUnitNumber] = useState("");
-  const [workDescription, setWorkDescription] = useState("");
-  const [prevBilled, setPrevBilled] = useState("");
-  const [currentBilled, setCurrentBilled] = useState("");
-  const [gstRate, setGstRate] = useState("18");
-  const [submitting, setSubmitting] = useState(false);
+  const [form, setForm] = useState({
+    bill_no: `RA-${new Date().getFullYear()}-${Math.floor(10 + Math.random() * 89)}`,
+    project_id: '',
+    contractor_name: '',
+    contractor_pan: '',
+    work_description: '',
+    gross_amount: 0,
+    gst_percent: 18,
+  });
+
+  const fetchData = async () => {
+    setLoading(true);
+    const [{ data: billData }, { data: projData }] = await Promise.all([
+      supabase.from('ra_bills').select('*, projects(name)').order('created_at', { ascending: false }),
+      supabase.from('projects').select('id, name'),
+    ]);
+    if (billData) setBills(billData);
+    if (projData) setProjects(projData);
+    setLoading(false);
+  };
 
   useEffect(() => {
-    fetchBills();
+    fetchData();
   }, []);
 
-  const fetchBills = async () => {
-    try {
-      const { data, error } = await supabase
-        .from("client_ra_bills")
-        .select("*")
-        .order("created_at", { ascending: false });
+  const gross = Number(form.gross_amount);
+  const gstAmt = (gross * Number(form.gst_percent)) / 100;
+  const netPayable = gross + gstAmt;
 
-      if (error) throw error;
-      if (data) setBills(data);
-    } catch (error) {
-      console.error("Error fetching RA bills:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleCreateBill = async (e: React.FormEvent) => {
+  const handleSaveBill = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSubmitting(true);
+    const { error } = await supabase.from('ra_bills').insert([
+      {
+        bill_no: form.bill_no,
+        project_id: form.project_id ? Number(form.project_id) : null,
+        contractor_name: form.contractor_name,
+        contractor_pan: form.contractor_pan,
+        work_description: form.work_description,
+        gross_amount: gross,
+        gst_amount: gstAmt,
+        net_payable_amount: netPayable,
+        status: 'Approved',
+      },
+    ]);
 
-    try {
-      const { error } = await supabase.from("client_ra_bills").insert({
-        bill_no: billNo,
-        client_name: clientName,
-        unit_number: unitNumber,
-        work_description: workDescription,
-        previous_billed_amount: parseFloat(prevBilled) || 0,
-        current_bill_amount: parseFloat(currentBilled) || 0,
-        gst_percentage: parseFloat(gstRate) || 18,
-        status: "Unpaid"
-      });
-
-      if (error) throw error;
-
-      alert("RA Bill generated successfully!");
-      setShowModal(false);
-      setBillNo(`RA-${Math.floor(1000 + Math.random() * 9000)}`);
-      setClientName("");
-      setUnitNumber("");
-      setWorkDescription("");
-      setPrevBilled("");
-      setCurrentBilled("");
-      fetchBills();
-    } catch (error: any) {
-      alert("Error generating bill: " + error.message);
-    } finally {
-      setSubmitting(false);
+    if (error) {
+      alert('Error saving RA Bill: ' + error.message);
+    } else {
+      setShowForm(false);
+      fetchData();
     }
   };
 
-  const updateStatus = async (id: string, newStatus: string) => {
-    const { error } = await supabase
-      .from("client_ra_bills")
-      .update({ status: newStatus })
-      .eq("id", id);
-
-    if (!error) fetchBills();
-  };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <div className="w-10 h-10 border-4 border-pink-600 border-t-transparent rounded-full animate-spin"></div>
-      </div>
-    );
-  }
+  const formatINR = (val: number) =>
+    new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(val || 0);
 
   return (
-    <div className="flex min-h-screen bg-slate-50 font-sans">
-      <Sidebar />
-
-      <main className="flex-1 flex flex-col min-w-0 overflow-y-auto">
-        <header className="bg-white border-b border-slate-200 h-16 px-8 flex items-center justify-between sticky top-0 z-10 shadow-sm">
-          <h2 className="font-extrabold text-slate-800 text-lg">Running Account (RA) Bills & Invoicing</h2>
-          <button
-            onClick={() => setShowModal(true)}
-            className="flex items-center gap-2 bg-pink-600 hover:bg-pink-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md shadow-pink-600/20"
-          >
-            <Plus size={16} /> Generate New RA Bill
-          </button>
-        </header>
-
-        <div className="p-8 max-w-7xl mx-auto w-full space-y-6">
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-            {bills.length === 0 ? (
-              <div className="text-center py-12 text-slate-400 text-xs">
-                No RA bills generated yet. Click &quot;Generate New RA Bill&quot; to start.
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="bg-slate-900 text-white uppercase tracking-wider">
-                      <th className="p-4 font-bold">Bill No</th>
-                      <th className="p-4 font-bold">Client & Unit</th>
-                      <th className="p-4 font-bold">Work Description</th>
-                      <th className="p-4 font-bold">Current Amount</th>
-                      <th className="p-4 font-bold">GST</th>
-                      <th className="p-4 font-bold">Status</th>
-                      <th className="p-4 font-bold text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {bills.map((bill) => {
-                      const current = Number(bill.current_bill_amount) || 0;
-                      const gstAmt = (current * Number(bill.gst_percentage)) / 100;
-                      const totalWithGst = current + gstAmt;
-
-                      return (
-                        <tr key={bill.id} className="hover:bg-slate-50 transition-colors">
-                          <td className="p-4 font-black text-slate-800">{bill.bill_no}</td>
-                          <td className="p-4">
-                            <p className="font-bold text-slate-800">{bill.client_name}</p>
-                            <p className="text-[11px] text-slate-500">Unit: {bill.unit_number}</p>
-                          </td>
-                          <td className="p-4 text-slate-600 max-w-xs truncate">{bill.work_description}</td>
-                          <td className="p-4 font-black text-slate-900">₹ {totalWithGst.toLocaleString()}</td>
-                          <td className="p-4 text-slate-500">{bill.gst_percentage}%</td>
-                          <td className="p-4">
-                            <span className={`px-2.5 py-1 rounded-full font-bold text-[10px] ${bill.status === 'Paid' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
-                              {bill.status}
-                            </span>
-                          </td>
-                          <td className="p-4 text-right space-x-2">
-                            <button
-                              onClick={() => setPrintingBill(bill)}
-                              className="px-3 py-1.5 bg-slate-900 text-white rounded-lg font-bold hover:bg-slate-800 inline-flex items-center gap-1 shadow-sm"
-                            >
-                              <Printer size={12} /> Print PDF
-                            </button>
-                            {bill.status === 'Unpaid' ? (
-                              <button
-                                onClick={() => updateStatus(bill.id, 'Paid')}
-                                className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg font-bold hover:bg-emerald-700 shadow-sm"
-                              >
-                                Mark Paid
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => updateStatus(bill.id, 'Unpaid')}
-                                className="px-3 py-1.5 bg-amber-600 text-white rounded-lg font-bold hover:bg-amber-700 shadow-sm"
-                              >
-                                Mark Unpaid
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
+    <div className="min-h-screen bg-slate-50 p-6 text-slate-900">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-xl border border-slate-200 shadow-sm mb-6">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-blue-800 text-white rounded-lg shadow">
+            <Receipt className="w-6 h-6" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold text-slate-900">Contractor Running Account (RA) Bills</h1>
+            <p className="text-xs text-slate-500">UNIVERSAL ENGICON PVT. LTD. • Measurement & Sub-Contractor Billing</p>
           </div>
         </div>
-      </main>
+        <button
+          onClick={() => setShowForm(!showForm)}
+          className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-800 text-white text-sm font-bold rounded-lg shadow hover:bg-slate-900 transition-all"
+        >
+          <Plus className="w-4 h-4" />
+          New RA Bill
+        </button>
+      </div>
 
-      {/* Modal for New Bill */}
-      {showModal && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden">
-            <div className="bg-slate-900 px-6 py-4 flex justify-between items-center text-white">
-              <h3 className="font-bold text-sm">Generate Running Account (RA) Bill</h3>
-              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-lg">
-                <X size={18} />
-              </button>
+      {showForm && (
+        <form onSubmit={handleSaveBill} className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm mb-6 space-y-4">
+          <div className="flex justify-between items-center border-b pb-3">
+            <h2 className="font-bold text-slate-800">Certify Contractor RA Bill</h2>
+            <button type="button" onClick={() => setShowForm(false)} className="text-slate-400 hover:text-slate-700">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+            <div>
+              <label className="block font-semibold mb-1">RA Bill No</label>
+              <input
+                type="text"
+                required
+                value={form.bill_no}
+                onChange={(e) => setForm({ ...form, bill_no: e.target.value })}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2"
+              />
             </div>
-
-            <form onSubmit={handleCreateBill} className="p-6 space-y-4 text-xs">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-slate-600 mb-1">Bill Number *</label>
-                  <input
-                    type="text"
-                    required
-                    value={billNo}
-                    onChange={(e) => setBillNo(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold text-slate-800"
-                  />
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-600 mb-1">Unit Number *</label>
-                  <input
-                    type="text"
-                    required
-                    value={unitNumber}
-                    onChange={(e) => setUnitNumber(e.target.value)}
-                    placeholder="e.g. Flat 302"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-600 mb-1">Client Name *</label>
-                <input
-                  type="text"
-                  required
-                  value={clientName}
-                  onChange={(e) => setClientName(e.target.value)}
-                  placeholder="Client full name"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-600 mb-1">Work Description / Milestone *</label>
-                <textarea
-                  rows={2}
-                  required
-                  value={workDescription}
-                  onChange={(e) => setWorkDescription(e.target.value)}
-                  placeholder="Details of construction stage completed..."
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"
-                />
-              </div>
-
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="block font-bold text-slate-600 mb-1">Prev Billed (₹)</label>
-                  <input
-                    type="number"
-                    value={prevBilled}
-                    onChange={(e) => setPrevBilled(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"
-                  />
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-600 mb-1">Current Bill (₹) *</label>
-                  <input
-                    type="number"
-                    required
-                    value={currentBilled}
-                    onChange={(e) => setCurrentBilled(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold text-pink-600"
-                  />
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-600 mb-1">GST Rate (%)</label>
-                  <input
-                    type="number"
-                    value={gstRate}
-                    onChange={(e) => setGstRate(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"
-                  />
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
-                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 border rounded-xl font-semibold">Cancel</button>
-                <button type="submit" disabled={submitting} className="px-5 py-2 bg-pink-600 text-white rounded-xl font-bold">
-                  {submitting ? "Generating..." : "Save & Generate"}
-                </button>
-              </div>
-            </form>
+            <div>
+              <label className="block font-semibold mb-1">Project / Site</label>
+              <select
+                required
+                value={form.project_id}
+                onChange={(e) => setForm({ ...form, project_id: e.target.value })}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2"
+              >
+                <option value="">Select Project</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Contractor Name</label>
+              <input
+                type="text"
+                required
+                placeholder="e.g., Maa Sharda Civil Works"
+                value={form.contractor_name}
+                onChange={(e) => setForm({ ...form, contractor_name: e.target.value })}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Contractor PAN / GST</label>
+              <input
+                type="text"
+                placeholder="ABCDE1234F"
+                value={form.contractor_pan}
+                onChange={(e) => setForm({ ...form, contractor_pan: e.target.value })}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 uppercase"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Work Description (MB Item)</label>
+              <input
+                type="text"
+                required
+                placeholder="e.g., RCC Slab Shuttering & Steel Binding - 3rd Floor"
+                value={form.work_description}
+                onChange={(e) => setForm({ ...form, work_description: e.target.value })}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Certified Gross Amount (₹)</label>
+              <input
+                type="number"
+                required
+                value={form.gross_amount}
+                onChange={(e) => setForm({ ...form, gross_amount: Number(e.target.value) })}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2"
+              />
+            </div>
           </div>
-        </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between bg-slate-100 p-4 rounded-lg gap-4">
+            <div className="text-sm font-semibold text-slate-700">
+              Gross: <span className="font-bold">{formatINR(gross)}</span> + GST (18%):{' '}
+              <span className="font-bold">{formatINR(gstAmt)}</span> = Net Payable:{' '}
+              <span className="text-blue-800 font-black text-base">{formatINR(netPayable)}</span>
+            </div>
+            <button type="submit" className="px-6 py-2.5 bg-emerald-700 text-white font-bold rounded-lg shadow hover:bg-emerald-800">
+              Approve & Post to Ledger
+            </button>
+          </div>
+        </form>
       )}
 
-      {/* Printable PDF Modal View */}
-      {printingBill && (
-        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 print:p-0 print:bg-white">
-          <div className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl overflow-hidden print:shadow-none print:w-full print:max-w-none">
-            <div className="bg-slate-900 px-6 py-4 flex justify-between items-center text-white print:hidden">
-              <h3 className="font-bold text-sm">RA Bill Print Preview</h3>
-              <div className="flex gap-2">
-                <button onClick={() => window.print()} className="px-3 py-1.5 bg-pink-600 rounded-lg text-xs font-bold inline-flex items-center gap-1">
-                  <Printer size={14} /> Print / Save PDF
-                </button>
-                <button onClick={() => setPrintingBill(null)} className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-lg">
-                  <X size={16} />
-                </button>
-              </div>
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse text-sm">
+            <thead>
+              <tr className="bg-slate-100 border-b border-slate-200 text-xs font-bold text-slate-600 uppercase">
+                <th className="py-3 px-4">RA Bill No</th>
+                <th className="py-3 px-4">Project</th>
+                <th className="py-3 px-4">Contractor</th>
+                <th className="py-3 px-4">Work Certified</th>
+                <th className="py-3 px-4 text-right">Net Payable</th>
+                <th className="py-3 px-4 text-center">Official PDF</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {bills.map((bill) => (
+                <tr key={bill.id} className="hover:bg-slate-50">
+                  <td className="py-3 px-4 font-mono font-bold text-blue-800">{bill.bill_no || `RA-${bill.id}`}</td>
+                  <td className="py-3 px-4 font-medium">{bill.projects?.name || 'Site'}</td>
+                  <td className="py-3 px-4 font-semibold">{bill.contractor_name}</td>
+                  <td className="py-3 px-4">{bill.work_description}</td>
+                  <td className="py-3 px-4 text-right font-bold text-slate-900">
+                    {formatINR(bill.net_payable_amount || bill.gross_amount)}
+                  </td>
+                  <td className="py-3 px-4 text-center">
+                    <button
+                      onClick={() => setPrintBill(bill)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-800 text-white text-xs font-bold rounded-lg shadow-sm hover:bg-slate-900 transition-all"
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                      Print PDF
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {!loading && bills.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-slate-400">No Contractor RA Bills found.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {printBill && (
+        <div className="fixed inset-0 z-50 bg-black/70 overflow-y-auto p-4 md:p-8">
+          <div className="max-w-4xl mx-auto bg-white rounded-xl p-5 shadow-2xl">
+            <div className="no-print flex justify-between items-center border-b pb-3 mb-4">
+              <span className="font-bold text-slate-700 text-sm">Contractor RA Bill Certificate (A4)</span>
+              <button
+                onClick={() => setPrintBill(null)}
+                className="px-3 py-1.5 bg-rose-600 text-white text-xs font-bold rounded-lg hover:bg-rose-700"
+              >
+                Close Preview ✕
+              </button>
             </div>
-
-            {/* Printable Invoice Area */}
-            <div className="p-8 space-y-6 text-slate-800 text-xs bg-white">
-              <div className="flex justify-between items-start border-b pb-6">
-                <div>
-                  <h1 className="text-xl font-black text-slate-900">UNIVERSAL ENGICON PVT. LTD.</h1>
-                  <p className="text-slate-500">Civil Construction, Infrastructure & Real Estate</p>
-                </div>
-                <div className="text-right">
-                  <h2 className="font-black text-sm uppercase text-pink-600">Running Account Bill</h2>
-                  <p className="font-bold text-slate-800">Bill No: {printingBill.bill_no}</p>
-                  <p className="text-slate-500">Date: {new Date(printingBill.created_at).toLocaleDateString()}</p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border">
-                <div>
-                  <p className="font-bold text-slate-400 uppercase text-[10px]">Billed To:</p>
-                  <p className="font-black text-sm text-slate-900">{printingBill.client_name}</p>
-                  <p className="text-slate-600">Unit / Property: {printingBill.unit_number}</p>
-                </div>
-                <div>
-                  <p className="font-bold text-slate-400 uppercase text-[10px]">Project Details:</p>
-                  <p className="font-bold text-slate-800">Godrej Zen Estate Phase-2</p>
-                  <p className="text-slate-600">Status: {printingBill.status}</p>
-                </div>
-              </div>
-
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-slate-100 text-slate-700">
-                    <th className="p-3 font-bold border-b">Description of Work</th>
-                    <th className="p-3 font-bold border-b text-right">Amount (₹)</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  <tr>
-                    <td className="p-3 font-medium">{printingBill.work_description}</td>
-                    <td className="p-3 text-right font-bold">₹ {Number(printingBill.current_bill_amount).toLocaleString()}</td>
-                  </tr>
-                  <tr>
-                    <td className="p-3 text-slate-500">Previous Billed Amount</td>
-                    <td className="p-3 text-right text-slate-500">₹ {Number(printingBill.previous_billed_amount).toLocaleString()}</td>
-                  </tr>
-                </tbody>
-              </table>
-
-              <div className="flex justify-end pt-4">
-                <div className="w-64 space-y-2 border-t pt-3">
-                  <div className="flex justify-between">
-                    <span className="text-slate-600">Subtotal:</span>
-                    <span className="font-bold">₹ {Number(printingBill.current_bill_amount).toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-600">GST ({printingBill.gst_percentage}%):</span>
-                    <span className="font-bold">₹ {((Number(printingBill.current_bill_amount) * Number(printingBill.gst_percentage)) / 100).toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between text-sm font-black text-slate-900 border-t pt-2">
-                    <span>Total Payable:</span>
-                    <span className="text-pink-600">₹ {(Number(printingBill.current_bill_amount) + (Number(printingBill.current_bill_amount) * Number(printingBill.gst_percentage)) / 100).toLocaleString()}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-12 flex justify-between items-end border-t mt-12 text-[11px] text-slate-500">
-                <p>This is a computer-generated Running Account bill for Universal Engicon Pvt. Ltd.</p>
-                <div className="text-center space-y-4">
-                  <div className="h-10"></div>
-                  <p className="font-bold border-t border-slate-400 pt-1">Authorized Signatory</p>
-                </div>
-              </div>
-            </div>
+            <OfficialPrintDocument
+              docType="CONTRACTOR RA BILL"
+              docNumber={printBill.bill_no || `RA-${printBill.id}`}
+              docDate={(printBill.created_at || new Date().toISOString()).slice(0, 10)}
+              projectName={printBill.projects?.name || 'Universal Engicon Site'}
+              partyTitle="Sub-Contractor Details"
+              partyName={printBill.contractor_name || 'Contractor'}
+              partyGstOrPan={printBill.contractor_pan}
+              items={[
+                {
+                  description: printBill.work_description || 'Civil Construction Execution Work',
+                  unit: 'LS',
+                  quantity: 1,
+                  rate: Number(printBill.gross_amount || printBill.net_payable_amount || 0),
+                  amount: Number(printBill.gross_amount || printBill.net_payable_amount || 0),
+                },
+              ]}
+              subTotal={Number(printBill.gross_amount || printBill.net_payable_amount || 0)}
+              gstAmount={Number(printBill.gst_amount || 0)}
+              grandTotal={Number(printBill.net_payable_amount || printBill.gross_amount || 0)}
+            />
           </div>
         </div>
       )}

@@ -1,412 +1,299 @@
-'use client'
+'use client';
 
-import { useState, useEffect } from 'react'
-import { supabase } from '../../lib/supabase'
+import React, { useEffect, useState } from 'react';
+import { supabase } from '../lib/supabase';
+import OfficialPrintDocument from '../components/OfficialPrintDocument';
+import { Plus, Printer, ShoppingCart, X } from 'lucide-react';
 
-export default function CorporatePOPage() {
-  const [projectList, setProjectList] = useState<any[]>([])
-  const [indentList, setIndentList] = useState<any[]>([])
-  const [vendorList, setVendorList] = useState<any[]>([])
+export default function PurchaseOrdersPage() {
+  const [orders, setOrders] = useState<any[]>([]);
+  const [projects, setProjects] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [printPO, setPrintPO] = useState<any | null>(null);
 
-  // Form Fields
-  const [selectedProjectId, setSelectedProjectId] = useState('')
-  const [projectName, setProjectName] = useState('')
-  const [selectedIndentId, setSelectedIndentId] = useState('')
-  const [orderDate, setOrderDate] = useState(new Date().toISOString().split('T')[0])
-  
-  // Vendor details
-  const [vendorName, setVendorName] = useState('')
-  const [vendorAddress, setVendorAddress] = useState('')
-  const [vendorPhone, setVendorPhone] = useState('')
-  const [vendorGstin, setVendorGstin] = useState('')
+  const [form, setForm] = useState({
+    po_number: `PO-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`,
+    project_id: '',
+    vendor_name: '',
+    vendor_gstin: '',
+    material_name: '',
+    unit: 'Bags',
+    quantity: 100,
+    rate: 380,
+    gst_percent: 18,
+  });
 
-  // Item details & GST
-  const [itemDescription, setItemDescription] = useState('')
-  const [quantity, setQuantity] = useState<number>(0)
-  const [unit, setUnit] = useState('Bags')
-  const [unitRate, setUnitRate] = useState<number>(0)
-  const [gstRate, setGstRate] = useState<number>(18) // Default 18%
-  const [gstType, setGstType] = useState<'LOCAL' | 'INTERSTATE'>('LOCAL') // Local = CGST+SGST, Interstate = IGST
+  const fetchData = async () => {
+    setLoading(true);
+    const [{ data: poData }, { data: projData }] = await Promise.all([
+      supabase.from('purchase_orders').select('*, projects(name)').order('created_at', { ascending: false }),
+      supabase.from('projects').select('id, name'),
+    ]);
+    if (poData) setOrders(poData);
+    if (projData) setProjects(projData);
+    setLoading(false);
+  };
 
-  const [loading, setLoading] = useState(false)
-
-  // Fetch Master Data safely
   useEffect(() => {
-    async function loadMasterData() {
-      try {
-        // 1. Projects
-        const { data: proj } = await supabase.from('projects').select('*')
-        if (proj && proj.length > 0) {
-          setProjectList(proj)
-        } else {
-          setProjectList([{ id: 'PROJ-001', name: 'Godrej Zen Estate Phase-2' }])
-        }
+    fetchData();
+  }, []);
 
-        // 2. Fetch Indents / PR (Checking both 'purchase_requests' and 'mr' tables)
-        let fetchedIndents: any[] = []
-        const { data: prData } = await supabase.from('purchase_requests').select('*')
-        if (prData && prData.length > 0) {
-          fetchedIndents = prData
-        } else {
-          // Fallback to 'mr' table if purchase_requests is empty
-          const { data: mrData } = await supabase.from('mr').select('*')
-          if (mrData) fetchedIndents = mrData
-        }
-        setIndentList(fetchedIndents)
+  const baseAmount = Number(form.quantity) * Number(form.rate);
+  const gstAmount = (baseAmount * Number(form.gst_percent)) / 100;
+  const totalAmount = baseAmount + gstAmount;
 
-        // 3. Vendors Master
-        const { data: vend } = await supabase.from('vendors_master').select('*')
-        if (vend) setVendorList(vend)
-      } catch (err) {
-        console.error('Error loading master data:', err)
-      }
+  const handleCreatePO = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const { error } = await supabase.from('purchase_orders').insert([
+      {
+        po_number: form.po_number,
+        project_id: form.project_id ? Number(form.project_id) : null,
+        vendor_name: form.vendor_name,
+        vendor_gstin: form.vendor_gstin,
+        material_name: form.material_name,
+        unit: form.unit,
+        quantity: Number(form.quantity),
+        rate: Number(form.rate),
+        gst_percent: Number(form.gst_percent),
+        base_amount: baseAmount,
+        gst_amount: gstAmount,
+        total_amount: totalAmount,
+        status: 'Approved',
+      },
+    ]);
+
+    if (error) {
+      alert('Error saving PO: ' + error.message);
+    } else {
+      setShowForm(false);
+      fetchData();
     }
-    loadMasterData()
-  }, [])
+  };
 
-  // Handle Project Selection
-  const handleProjectChange = (id: string) => {
-    setSelectedProjectId(id)
-    const found = projectList.find(p => (p.id || p.project_id)?.toString() === id)
-    if (found) {
-      setProjectName(found.name || found.project_name || 'Universal Engicon Site')
-    }
-  }
-
-  // Handle Indent / PR Selection
-  const handleIndentChange = (id: string) => {
-    setSelectedIndentId(id)
-    const foundIndent = indentList.find(i => i.id.toString() === id)
-    if (foundIndent) {
-      setItemDescription(foundIndent.item_description || foundIndent.item_name || foundIndent.material_name || '')
-      setQuantity(Number(foundIndent.quantity || foundIndent.req_qty || foundIndent.qty || 0))
-      setUnit(foundIndent.unit || 'Bags')
-      
-      if (foundIndent.project_id) {
-        setSelectedProjectId(foundIndent.project_id)
-        const projFound = projectList.find(p => (p.id || p.project_id)?.toString() === foundIndent.project_id.toString())
-        if (projFound) {
-          setProjectName(projFound.name || projFound.project_name || '')
-        }
-      }
-    }
-  }
-
-  // Handle Vendor Selection
-  const handleVendorChange = (id: string) => {
-    const found = vendorList.find(v => v.id.toString() === id)
-    if (found) {
-      setVendorName(found.vendor_name || '')
-      setVendorAddress(found.address || '')
-      setVendorPhone(found.phone || '')
-      setVendorGstin(found.gstin || '')
-    }
-  }
-
-  // Corporate Financial Calculations (Subtotal, CGST, SGST, IGST, Grand Total)
-  const subtotal = (quantity || 0) * (unitRate || 0)
-  const totalGstAmount = (subtotal * gstRate) / 100
-  
-  let cgst = 0
-  let sgst = 0
-  let igst = 0
-
-  if (gstType === 'LOCAL') {
-    cgst = totalGstAmount / 2
-    sgst = totalGstAmount / 2
-  } else {
-    igst = totalGstAmount
-  }
-
-  const grandTotal = subtotal + totalGstAmount
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!selectedProjectId || !vendorName || !itemDescription || quantity <= 0 || unitRate <= 0) {
-      alert('Please fill in all mandatory fields (Project, Vendor, Item, Quantity, and Unit Rate).')
-      return
-    }
-
-    setLoading(true)
-    try {
-      const payload = {
-        project_id: selectedProjectId,
-        project_name: projectName || 'Godrej Zen Estate',
-        indent_id: selectedIndentId || null,
-        order_date: orderDate,
-        vendor_name: vendorName,
-        vendor_address: vendorAddress || 'N/A',
-        vendor_phone: vendorPhone || 'N/A',
-        vendor_gstin: vendorGstin || 'N/A',
-        item_description: itemDescription,
-        quantity: Number(quantity),
-        unit: unit,
-        unit_rate: Number(unitRate),
-        subtotal: Number(subtotal),
-        gst_rate: Number(gstRate),
-        cgst_amount: Number(cgst),
-        sgst_amount: Number(sgst),
-        igst_amount: Number(igst),
-        gst_amount: Number(totalGstAmount),
-        grand_total: Number(grandTotal),
-        status: 'Pending Approval'
-      }
-
-      console.log('Submitting Corporate PO:', payload)
-
-      const { error } = await supabase.from('purchase_orders').insert([payload])
-
-      if (error) {
-        console.error('Supabase Insert Error:', error)
-        alert(`Database Error: ${error.message}`)
-        return
-      }
-
-      alert('Corporate Purchase Order generated and filed successfully!')
-      
-      // Reset Item fields
-      setSelectedIndentId('')
-      setItemDescription('')
-      setQuantity(0)
-      setUnitRate(0)
-    } catch (err: any) {
-      console.error('Unexpected error:', err)
-      alert(`Unexpected Error: ${err.message || err}`)
-    } finally {
-      setLoading(false)
-    }
-  }
+  const formatINR = (val: number) =>
+    new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(val || 0);
 
   return (
-    <div className="p-8 max-w-6xl mx-auto font-sans bg-slate-950 text-slate-100 min-h-screen">
-      
-      {/* Corporate Header */}
-      <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl mb-8 shadow-xl flex justify-between items-center">
-        <div>
-          <span className="bg-blue-600 text-white text-[10px] font-extrabold uppercase tracking-widest px-3 py-1 rounded-full">
-            Universal Engicon ERP
-          </span>
-          <h1 className="text-3xl font-black text-white mt-2">Enterprise Purchase Order & GST Module</h1>
-          <p className="text-slate-400 text-xs mt-1">Automated PR Indent Linking & Corporate Tax Calculation Suite</p>
+    <div className="min-h-screen bg-slate-50 p-6 text-slate-900">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-xl border border-slate-200 shadow-sm mb-6">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-blue-800 text-white rounded-lg shadow">
+            <ShoppingCart className="w-6 h-6" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold text-slate-900">Purchase Orders (PO)</h1>
+            <p className="text-xs text-slate-500">UNIVERSAL ENGICON PVT. LTD. • Procurement & GST Billing</p>
+          </div>
         </div>
+        <button
+          onClick={() => setShowForm(!showForm)}
+          className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-800 text-white text-sm font-bold rounded-lg shadow hover:bg-slate-900 transition-all"
+        >
+          <Plus className="w-4 h-4" />
+          Create New PO
+        </button>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        
-        {/* Step 1: PR / Indent Selection */}
-        <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-md">
-          <h2 className="text-md font-bold text-slate-200 mb-3">1. Select Purchase Indent (PR / Material Request)</h2>
-          <select 
-            value={selectedIndentId} 
-            onChange={(e) => handleIndentChange(e.target.value)}
-            className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl text-white font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none"
-          >
-            <option value="">-- Choose Approved Indent / PR --</option>
-            {indentList.map(ind => (
-              <option key={ind.id} value={ind.id}>
-                PR/MR #{ind.id} — {ind.item_description || ind.item_name || ind.material_name || 'Material'} ({ind.quantity || ind.req_qty || ind.qty} {ind.unit || 'Nos'})
-              </option>
-            ))}
-          </select>
-          {indentList.length === 0 && (
-            <p className="text-[11px] text-amber-400 mt-2">
-              ⚠️ No Indents/PR found in 'purchase_requests' or 'mr' table. You can enter details manually.
-            </p>
-          )}
-        </div>
-
-        {/* Step 2: Project & Date */}
-        <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-md grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Project Site</label>
-            <select 
-              value={selectedProjectId} 
-              onChange={(e) => handleProjectChange(e.target.value)}
-              className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl text-white font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none"
-              required
-            >
-              <option value="">-- Choose Project --</option>
-              {projectList.map(p => (
-                <option key={p.id || p.project_id} value={p.id || p.project_id}>
-                  {p.id || p.project_id} - {p.name || p.project_name}
-                </option>
-              ))}
-            </select>
+      {/* Create PO Form */}
+      {showForm && (
+        <form onSubmit={handleCreatePO} className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm mb-6 space-y-4">
+          <div className="flex justify-between items-center border-b pb-3">
+            <h2 className="font-bold text-slate-800">Issue New Purchase Order</h2>
+            <button type="button" onClick={() => setShowForm(false)} className="text-slate-400 hover:text-slate-700">
+              <X className="w-5 h-5" />
+            </button>
           </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Order Date</label>
-            <input 
-              type="date" 
-              value={orderDate} 
-              onChange={(e) => setOrderDate(e.target.value)}
-              className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl text-white font-medium"
-              required
-            />
-          </div>
-        </div>
-
-        {/* Step 3: Vendor Selection & Master Details */}
-        <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-md">
-          <h2 className="text-md font-bold text-slate-200 mb-4">2. Vendor Master & GSTIN</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
             <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Select Vendor</label>
-              <select 
-                onChange={(e) => handleVendorChange(e.target.value)}
-                className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl text-white font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              <label className="block font-semibold mb-1">PO Number</label>
+              <input
+                type="text"
                 required
+                value={form.po_number}
+                onChange={(e) => setForm({ ...form, po_number: e.target.value })}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Project / Site</label>
+              <select
+                required
+                value={form.project_id}
+                onChange={(e) => setForm({ ...form, project_id: e.target.value })}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2"
               >
-                <option value="">-- Choose Approved Vendor --</option>
-                {vendorList.map(v => (
-                  <option key={v.id} value={v.id}>
-                    {v.vendor_name} [{v.category || 'General'}]
-                  </option>
+                <option value="">Select Project</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
             </div>
             <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Vendor Name</label>
-              <input 
-                type="text" 
-                value={vendorName} 
-                onChange={(e) => setVendorName(e.target.value)}
-                placeholder="Vendor Name" 
-                className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl text-white font-medium"
+              <label className="block font-semibold mb-1">Vendor / Supplier Name</label>
+              <input
+                type="text"
                 required
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Phone</label>
-              <input type="text" value={vendorPhone} readOnly placeholder="Phone" className="w-full p-3 bg-slate-800/50 border border-slate-700 rounded-xl text-slate-400" />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Address</label>
-              <input type="text" value={vendorAddress} readOnly placeholder="Address" className="w-full p-3 bg-slate-800/50 border border-slate-700 rounded-xl text-slate-400" />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase mb-2">GSTIN</label>
-              <input type="text" value={vendorGstin} readOnly placeholder="GSTIN" className="w-full p-3 bg-slate-800/50 border border-slate-700 rounded-xl text-slate-400 uppercase" />
-            </div>
-          </div>
-        </div>
-
-        {/* Step 4: Item Specifications & Rate */}
-        <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-md">
-          <h2 className="text-md font-bold text-slate-200 mb-4">3. Material Specification & Rate Entry</h2>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="md:col-span-2">
-              <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Item Description</label>
-              <input 
-                type="text" 
-                value={itemDescription} 
-                onChange={(e) => setItemDescription(e.target.value)}
-                placeholder="Pulled from PR or type here" 
-                className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl text-white"
-                required
+                placeholder="e.g., UltraTech Cement Distributors"
+                value={form.vendor_name}
+                onChange={(e) => setForm({ ...form, vendor_name: e.target.value })}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2"
               />
             </div>
             <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Quantity</label>
-              <input 
-                type="number" 
-                value={quantity || ''} 
-                onChange={(e) => setQuantity(parseFloat(e.target.value) || 0)}
-                placeholder="0" 
-                className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl text-white"
-                required
+              <label className="block font-semibold mb-1">Vendor GSTIN</label>
+              <input
+                type="text"
+                placeholder="10AAACT1234F1Z2"
+                value={form.vendor_gstin}
+                onChange={(e) => setForm({ ...form, vendor_gstin: e.target.value })}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 uppercase"
               />
             </div>
             <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Unit Rate (₹) [Manual]</label>
-              <input 
-                type="number" 
-                value={unitRate || ''} 
-                onChange={(e) => setUnitRate(parseFloat(e.target.value) || 0)}
-                placeholder="0.00" 
-                className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl text-blue-400 font-bold"
+              <label className="block font-semibold mb-1">Material / Item Description</label>
+              <input
+                type="text"
                 required
+                placeholder="e.g., OPC 53 Grade Cement"
+                value={form.material_name}
+                onChange={(e) => setForm({ ...form, material_name: e.target.value })}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2"
               />
             </div>
-          </div>
-        </div>
-
-        {/* Step 5: Corporate GST Summary & Calculation */}
-        <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-md space-y-6">
-          <h2 className="text-md font-bold text-slate-200">4. Corporate GST Tax Breakdown</h2>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase mb-2">GST Supply Type</label>
-              <select 
-                value={gstType} 
-                onChange={(e) => setGstType(e.target.value as any)}
-                className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl text-white font-medium"
-              >
-                <option value="LOCAL">Intra-State Supply (CGST + SGST)</option>
-                <option value="INTERSTATE">Inter-State Supply (IGST)</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Total GST Rate (%)</label>
-              <select 
-                value={gstRate} 
-                onChange={(e) => setGstRate(parseFloat(e.target.value))}
-                className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl text-white font-bold"
-              >
-                <option value={5}>5% GST</option>
-                <option value={12}>12% GST</option>
-                <option value={18}>18% Standard GST</option>
-                <option value={28}>28% GST</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-right bg-slate-800 p-4 rounded-xl border border-slate-700">
-            <div>
-              <span className="text-[10px] text-slate-400 uppercase block">Subtotal</span>
-              <span className="font-bold text-slate-200">₹{subtotal.toLocaleString()}</span>
-            </div>
-            {gstType === 'LOCAL' ? (
-              <>
-                <div>
-                  <span className="text-[10px] text-slate-400 uppercase block">CGST ({gstRate/2}%)</span>
-                  <span className="font-bold text-slate-200">₹{cgst.toLocaleString()}</span>
-                </div>
-                <div>
-                  <span className="text-[10px] text-slate-400 uppercase block">SGST ({gstRate/2}%)</span>
-                  <span className="font-bold text-slate-200">₹{sgst.toLocaleString()}</span>
-                </div>
-              </>
-            ) : (
-              <div className="col-span-2">
-                <span className="text-[10px] text-slate-400 uppercase block">IGST ({gstRate}%)</span>
-                <span className="font-bold text-slate-200">₹{igst.toLocaleString()}</span>
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="block font-semibold mb-1">Qty</label>
+                <input
+                  type="number"
+                  required
+                  value={form.quantity}
+                  onChange={(e) => setForm({ ...form, quantity: Number(e.target.value) })}
+                  className="w-full border border-slate-300 rounded-lg px-2 py-2"
+                />
               </div>
-            )}
-            <div>
-              <span className="text-[10px] text-slate-400 uppercase block">Total Tax</span>
-              <span className="font-bold text-emerald-400">₹{totalGstAmount.toLocaleString()}</span>
-            </div>
-            <div>
-              <span className="text-[10px] text-slate-400 uppercase block">Grand Total</span>
-              <span className="text-lg font-black text-blue-400">₹{grandTotal.toLocaleString()}</span>
+              <div>
+                <label className="block font-semibold mb-1">Unit</label>
+                <input
+                  type="text"
+                  value={form.unit}
+                  onChange={(e) => setForm({ ...form, unit: e.target.value })}
+                  className="w-full border border-slate-300 rounded-lg px-2 py-2"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold mb-1">Rate (₹)</label>
+                <input
+                  type="number"
+                  required
+                  value={form.rate}
+                  onChange={(e) => setForm({ ...form, rate: Number(e.target.value) })}
+                  className="w-full border border-slate-300 rounded-lg px-2 py-2"
+                />
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className="flex justify-end pt-2">
-          <button 
-            type="submit" 
-            disabled={loading}
-            className="px-10 py-4 bg-blue-600 hover:bg-blue-700 text-white font-extrabold rounded-xl shadow-lg transition disabled:opacity-50"
-          >
-            {loading ? 'Processing PO...' : 'Generate & File Corporate Purchase Order'}
-          </button>
-        </div>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between bg-slate-100 p-4 rounded-lg gap-4">
+            <div className="text-sm font-semibold text-slate-700">
+              Base: <span className="font-bold">{formatINR(baseAmount)}</span> + GST ({form.gst_percent}%):{' '}
+              <span className="font-bold">{formatINR(gstAmount)}</span> = Grand Total:{' '}
+              <span className="text-blue-800 font-black text-base">{formatINR(totalAmount)}</span>
+            </div>
+            <button type="submit" className="px-6 py-2.5 bg-emerald-700 text-white font-bold rounded-lg shadow hover:bg-emerald-800">
+              Save & Approve PO
+            </button>
+          </div>
+        </form>
+      )}
 
-      </form>
+      {/* PO Table */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse text-sm">
+            <thead>
+              <tr className="bg-slate-100 border-b border-slate-200 text-xs font-bold text-slate-600 uppercase">
+                <th className="py-3 px-4">PO Number</th>
+                <th className="py-3 px-4">Project</th>
+                <th className="py-3 px-4">Vendor</th>
+                <th className="py-3 px-4">Material</th>
+                <th className="py-3 px-4 text-right">Qty / Rate</th>
+                <th className="py-3 px-4 text-right">Grand Total</th>
+                <th className="py-3 px-4 text-center">Official PDF</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {orders.map((po) => (
+                <tr key={po.id} className="hover:bg-slate-50">
+                  <td className="py-3 px-4 font-mono font-bold text-blue-800">{po.po_number || `PO-${po.id}`}</td>
+                  <td className="py-3 px-4 font-medium">{po.projects?.name || 'General Site'}</td>
+                  <td className="py-3 px-4 font-semibold">{po.vendor_name}</td>
+                  <td className="py-3 px-4">{po.material_name}</td>
+                  <td className="py-3 px-4 text-right text-slate-600">
+                    {po.quantity} {po.unit} @ ₹{po.rate}
+                  </td>
+                  <td className="py-3 px-4 text-right font-bold text-slate-900">
+                    {formatINR(po.total_amount || po.amount)}
+                  </td>
+                  <td className="py-3 px-4 text-center">
+                    <button
+                      onClick={() => setPrintPO(po)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-800 text-white text-xs font-bold rounded-lg shadow-sm hover:bg-slate-900 transition-all"
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                      Print PDF
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {!loading && orders.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="py-8 text-center text-slate-400">No Purchase Orders found.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* A4 Official Print Modal */}
+      {printPO && (
+        <div className="fixed inset-0 z-50 bg-black/70 overflow-y-auto p-4 md:p-8">
+          <div className="max-w-4xl mx-auto bg-white rounded-xl p-5 shadow-2xl">
+            <div className="no-print flex justify-between items-center border-b pb-3 mb-4">
+              <span className="font-bold text-slate-700 text-sm">Official A4 Letterhead Preview</span>
+              <button
+                onClick={() => setPrintPO(null)}
+                className="px-3 py-1.5 bg-rose-600 text-white text-xs font-bold rounded-lg hover:bg-rose-700"
+              >
+                Close Preview ✕
+              </button>
+            </div>
+            <OfficialPrintDocument
+              docType="PURCHASE ORDER"
+              docNumber={printPO.po_number || `PO-${printPO.id}`}
+              docDate={(printPO.created_at || new Date().toISOString()).slice(0, 10)}
+              projectName={printPO.projects?.name || 'Universal Engicon Site'}
+              partyTitle="Supplier / Vendor Details"
+              partyName={printPO.vendor_name || 'Approved Vendor'}
+              partyGstOrPan={printPO.vendor_gstin}
+              items={[
+                {
+                  description: printPO.material_name || 'Construction Material Supply',
+                  unit: printPO.unit || 'Nos',
+                  quantity: printPO.quantity || 1,
+                  rate: printPO.rate || 0,
+                  amount: Number(printPO.base_amount || printPO.total_amount || 0),
+                },
+              ]}
+              subTotal={Number(printPO.base_amount || printPO.total_amount || 0)}
+              gstAmount={Number(printPO.gst_amount || 0)}
+              grandTotal={Number(printPO.total_amount || printPO.amount || 0)}
+            />
+          </div>
+        </div>
+      )}
     </div>
-  )
+  );
 }
