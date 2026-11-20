@@ -6,7 +6,6 @@ import { createClient } from '@supabase/supabase-js';
 import {
   Building2,
   ShieldCheck,
-  Award,
   PhoneCall,
   Mail,
   MapPin,
@@ -114,10 +113,9 @@ export default function UniversalEngiconCorporateWebsite() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-blue-900 selection:text-white">
-      {/* 1. Top Corporate Navigation Bar (Light Theme + Embossed Buttons) */}
+      {/* 1. Top Corporate Navigation Bar */}
       <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-slate-200/90 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
-          {/* Brand Identity */}
           <Link href="/" className="flex items-center gap-3.5 group">
             <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-blue-900 to-slate-900 text-white flex items-center justify-center font-black text-xl tracking-tighter shadow-md border border-blue-950 group-hover:scale-105 transition-transform">
               UE
@@ -132,7 +130,6 @@ export default function UniversalEngiconCorporateWebsite() {
             </div>
           </Link>
 
-          {/* Embossed Button-Style Navigation */}
           <nav className="hidden md:flex items-center gap-2.5">
             {[
               { label: 'About Us', href: '#about' },
@@ -151,7 +148,6 @@ export default function UniversalEngiconCorporateWebsite() {
             ))}
           </nav>
 
-          {/* Employee / MD ERP Portal Login CTA */}
           <div className="flex items-center gap-3">
             <Link
               href="/login"
@@ -166,7 +162,6 @@ export default function UniversalEngiconCorporateWebsite() {
 
       {/* 2. Architectural Hero Banner */}
       <section className="relative bg-white border-b border-slate-200 overflow-hidden">
-        {/* Subtle Architectural Grid Pattern */}
         <div
           className="absolute inset-0 opacity-[0.035] pointer-events-none"
           style={{
@@ -211,7 +206,6 @@ export default function UniversalEngiconCorporateWebsite() {
             </div>
           </div>
 
-          {/* Executive Profile & Operational Benchmarks Card */}
           <div className="lg:col-span-5">
             <div className="bg-gradient-to-b from-slate-50 to-white border border-slate-200/90 rounded-2xl p-6 sm:p-8 shadow-xl space-y-6">
               <div className="flex items-center justify-between border-b border-slate-200 pb-5">
@@ -314,7 +308,7 @@ export default function UniversalEngiconCorporateWebsite() {
         </div>
       </section>
 
-      {/* 4. Interactive Projects Showcase with Embossed Filter Tabs */}
+      {/* 4. Interactive Projects Showcase */}
       <section id="projects" className="bg-white border-y border-slate-200 py-20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col md:flex-row md:items-end justify-between mb-10 gap-6">
@@ -327,7 +321,6 @@ export default function UniversalEngiconCorporateWebsite() {
               </h2>
             </div>
 
-            {/* Embossed Category Filter Buttons */}
             <div className="flex flex-wrap gap-2">
               {(
                 [
@@ -400,7 +393,7 @@ export default function UniversalEngiconCorporateWebsite() {
         </div>
       </section>
 
-      {/* 5. Engineering & Execution Edge (Trust Strip) */}
+      {/* 5. Engineering & Execution Edge */}
       <section id="quality" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-6">
         <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 rounded-3xl p-8 sm:p-12 text-white shadow-xl">
           <div className="max-w-2xl mb-10">
@@ -448,7 +441,6 @@ export default function UniversalEngiconCorporateWebsite() {
       {/* 6. Contact & Project Enquiry Section */}
       <section id="contact" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <div className="bg-white rounded-3xl border border-slate-200 shadow-xl overflow-hidden grid grid-cols-1 lg:grid-cols-12">
-          {/* Corporate Contact Info */}
           <div className="lg:col-span-5 bg-slate-900 text-white p-8 sm:p-10 flex flex-col justify-between space-y-8">
             <div>
               <span className="text-xs font-extrabold uppercase tracking-[0.2em] text-amber-400">
@@ -493,7 +485,6 @@ export default function UniversalEngiconCorporateWebsite() {
             </div>
           </div>
 
-          {/* Enquiry Form */}
           <div className="lg:col-span-7 p-8 sm:p-10">
             <h3 className="text-xl font-black text-slate-900 mb-1">Send an Official Enquiry</h3>
             <p className="text-xs text-slate-500 mb-6">
