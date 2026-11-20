@@ -1,9 +1,14 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { supabase } from '../lib/supabase';
-import OfficialPrintDocument from '../components/OfficialPrintDocument';
+import { createClient } from '@supabase/supabase-js';
+import OfficialPrintDocument from '../../components/OfficialPrintDocument';
 import { Plus, Printer, Receipt, X } from 'lucide-react';
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 export default function ContractorRABillsPage() {
   const [bills, setBills] = useState<any[]>([]);

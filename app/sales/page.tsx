@@ -1,9 +1,8 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { supabase } from '../lib/supabase';
-import OfficialPrintDocument from '../components/OfficialPrintDocument';
-import { Home, Plus, Printer, X } from 'lucide-react';
+import { supabase } from '../../lib/supabase';
+import OfficialPrintDocument from '../../components/OfficialPrintDocument';import { Home, Plus, Printer, X } from 'lucide-react';
 
 export default function RealEstateSalesPage() {
   const [bookings, setBookings] = useState<any[]>([]);

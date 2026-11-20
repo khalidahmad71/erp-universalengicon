@@ -1,10 +1,8 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { supabase } from '../lib/supabase';
-import OfficialPrintDocument from '../components/OfficialPrintDocument';
-import { Plus, Printer, ShoppingCart, X } from 'lucide-react';
-
+import { supabase } from '../../lib/supabase';
+import OfficialPrintDocument from '../../components/OfficialPrintDocument';import { Plus, Printer, ShoppingCart, X } from 'lucide-react';
 export default function PurchaseOrdersPage() {
   const [orders, setOrders] = useState<any[]>([]);
   const [projects, setProjects] = useState<any[]>([]);
