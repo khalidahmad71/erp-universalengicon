@@ -118,8 +118,7 @@ export default function EnterpriseLoginModule() {
                 <option value="Accounts Manager">Accounts Manager (GST, P&amp;L, Payroll)</option>
                 <option value="Store Keeper">Store Keeper (GRN &amp; Inventory)</option>
               </select>
-            </div>
-
+            </div>router.push('/dashboard');
             <button
               type="submit"
               disabled={isLoading}
