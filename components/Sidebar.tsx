@@ -39,6 +39,7 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     '/purchase-orders',
     '/ra',
     '/real-estate',
+    '/sales',
   ],
   site_engineer: [
     '/dashboard',
@@ -47,11 +48,13 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     '/mr',
     '/dpr',
     '/inventory',
+    '/store',
     '/machinery',
   ],
   store_manager: [
     '/dashboard',
     '/inventory',
+    '/store',
     '/mr',
     '/po',
     '/purchase-orders',
@@ -65,20 +68,21 @@ export function canAccessRoute(userRole: string | undefined, routePath: string):
   return allowedRoutes.some((allowed) => routePath === allowed || routePath.startsWith(allowed + '/'));
 }
 
-// 2. All Universal Engicon ERP Modules
+// 2. All Universal Engicon ERP Modules (With MD Approval Center at Top)
 const MENU_ITEMS = [
+  { label: 'MD Approval Center', href: '/approvals', icon: ShieldCheck },
   { label: 'Executive Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { label: 'Projects & Sites', href: '/projects', icon: Building2 },
   { label: 'BOQ & Estimation', href: '/boq', icon: FileSpreadsheet },
   { label: 'Material Requests (MR)', href: '/mr', icon: ClipboardList },
   { label: 'Purchase Orders (PO)', href: '/po', icon: ShoppingCart },
-  { label: 'Store & Inventory (GRN)', href: '/inventory', icon: Package },
+  { label: 'Store & Inventory (GRN)', href: '/store', icon: Package },
   { label: 'Daily Progress (DPR)', href: '/dpr', icon: FileCheck2 },
   { label: 'Contractor RA Bills', href: '/ra', icon: Receipt },
   { label: 'Finance & Master Ledger', href: '/finance', icon: IndianRupee },
-  { label: 'Real Estate Sales', href: '/real-estate', icon: Home },
+  { label: 'Real Estate Sales', href: '/sales', icon: Home },
   { label: 'Plant & Machinery', href: '/machinery', icon: Truck },
-  { label: 'HR & Muster Roll', href: '/hr', icon: Users },
+  { label: 'HR & Muster Roll', href: '/users', icon: Users },
 ];
 
 export default function Sidebar() {
@@ -88,7 +92,6 @@ export default function Sidebar() {
   const [userEmail, setUserEmail] = useState<string>('');
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  // Hide sidebar on login/auth pages
   if (pathname === '/login' || pathname === '/') {
     return null;
   }
@@ -190,7 +193,7 @@ export default function Sidebar() {
             );
           })}
         </nav>
-
+s
         {/* Logout Footer */}
         <div className="p-3 bg-white border-t border-slate-200">
           <button
