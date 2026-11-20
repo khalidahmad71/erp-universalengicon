@@ -1,6 +1,12 @@
 import type { Metadata } from 'next';
+import { Plus_Jakarta_Sans } from 'next/font/google';
 import './globals.css';
-import Sidebar from '../components/Sidebar';
+import Sidebar from '@/components/Sidebar';
+
+const jakarta = Plus_Jakarta_Sans({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700', '800'],
+});
 
 export const metadata: Metadata = {
   title: 'Universal Engicon Pvt. Ltd. | Corporate & Enterprise ERP',
@@ -14,7 +20,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="bg-slate-50 text-slate-900 antialiased">
+      <body className={`${jakarta.className} bg-slate-50 text-slate-900 antialiased`}>
         <div className="flex flex-col lg:flex-row min-h-screen">
           <Sidebar />
           <main className="flex-1 w-full">{children}</main>
