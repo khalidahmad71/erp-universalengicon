@@ -2,17 +2,26 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 export default function RootEntryPage() {
   const router = useRouter();
 
   useEffect(() => {
-    const hasSession = document.cookie.includes('ue_session=');
-    if (hasSession) {
-      router.replace('/dashboard');
-    } else {
-      router.replace('/login');
-    }
+    const checkUser = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        router.replace('/dashboard');
+      } else {
+        router.replace('/login');
+      }
+    };
+    checkUser();
   }, [router]);
 
   return (
@@ -22,7 +31,7 @@ export default function RootEntryPage() {
           UE
         </div>
         <h1 className="text-base font-extrabold text-slate-900">UNIVERSAL ENGICON PVT. LTD.</h1>
-        <p className="text-xs font-medium text-slate-500 mt-1">Opening Enterprise ERP...</p>
+        <p className="text-xs font-medium text-slate-500 mt-1">Redirecting to Enterprise ERP Login...</p>
       </div>
     </div>
   );

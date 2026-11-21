@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { createClient } from '@supabase/supabase-js';
 import {
   LayoutDashboard,
@@ -87,12 +87,10 @@ const MENU_ITEMS = [
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const router = useRouter();
   const [userRole, setUserRole] = useState<string>('admin');
   const [userEmail, setUserEmail] = useState<string>('');
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  // Hooks हमेशा conditional return से पहले होने चाहिए
   useEffect(() => {
     if (pathname === '/login' || pathname === '/') return;
 
@@ -119,8 +117,11 @@ export default function Sidebar() {
   }
 
   const handleLogout = async () => {
+    document.cookie = 'ue_session=; path=/; max-age=0';
+    document.cookie = 'ue_role=; path=/; max-age=0';
+    document.cookie = 'sb-access-token=; path=/; max-age=0';
     await supabase.auth.signOut();
-    router.push('/login');
+    window.location.href = '/login';
   };
 
   const visibleMenuItems = MENU_ITEMS.filter((item) => canAccessRoute(userRole, item.href));
@@ -201,7 +202,7 @@ export default function Sidebar() {
         <div className="p-3 bg-white border-t border-slate-200">
           <button
             onClick={handleLogout}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold text-rose-700 bg-rose-50 border border-rose-200 shadow-sm hover:bg-rose-600 hover:text-white transition-all"
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold text-rose-700 bg-rose-50 border border-rose-200 shadow-sm hover:bg-rose-600 hover:text-white transition-all cursor-pointer"
           >
             <LogOut className="w-4 h-4" />
             Sign Out
