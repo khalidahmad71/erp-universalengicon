@@ -13,6 +13,8 @@ import {
   User,
   IndianRupee,
   X,
+  Receipt,
+  Printer,
 } from 'lucide-react';
 
 const supabase = createClient(
@@ -35,8 +37,21 @@ interface RealEstateUnit {
   amount_received?: number;
 }
 
+interface CustomerReceipt {
+  id: string;
+  receipt_no: string;
+  project_name: string;
+  unit_number: string;
+  customer_name: string;
+  payment_mode: string;
+  transaction_ref?: string;
+  amount_received: number;
+  receipt_date: string;
+}
+
 export default function RealEstateSalesPage() {
   const [units, setUnits] = useState<RealEstateUnit[]>([]);
+  const [receipts, setReceipts] = useState<CustomerReceipt[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedProject, setSelectedProject] = useState<string>('Godrej Zen Estate Phase-2');
   const [typeFilter, setTypeFilter] = useState<string>('ALL');
@@ -59,26 +74,44 @@ export default function RealEstateSalesPage() {
   const [newArea, setNewArea] = useState('1500');
   const [newPrice, setNewPrice] = useState('9800000');
 
-  const fetchUnits = async () => {
-    setLoading(true);
-    const { data, error } = await supabase
-      .from('real_estate_units')
-      .select('*')
-      .order('floor_no', { ascending: true })
-      .order('unit_number', { ascending: true });
+  // Record Customer Receipt Modal State
+  const [showReceiptModal, setShowReceiptModal] = useState(false);
+  const [recUnitNo, setRecUnitNo] = useState('');
+  const [recCustomerName, setRecCustomerName] = useState('');
+  const [recPaymentMode, setRecPaymentMode] = useState('NEFT / RTGS');
+  const [recRefNo, setRecRefNo] = useState('');
+  const [recAmount, setRecAmount] = useState('');
+  const [recDate, setRecDate] = useState(new Date().toISOString().split('T')[0]);
 
-    if (!error && data) {
-      setUnits(data);
-      const projects = Array.from(new Set(data.map((u) => u.project_name)));
+  const fetchAllData = async () => {
+    setLoading(true);
+    const [unitsRes, receiptsRes] = await Promise.all([
+      supabase
+        .from('real_estate_units')
+        .select('*')
+        .order('floor_no', { ascending: true })
+        .order('unit_number', { ascending: true }),
+      supabase
+        .from('customer_receipts')
+        .select('*')
+        .order('created_at', { ascending: false }),
+    ]);
+
+    if (!unitsRes.error && unitsRes.data) {
+      setUnits(unitsRes.data);
+      const projects = Array.from(new Set(unitsRes.data.map((u) => u.project_name)));
       if (projects.length > 0 && !projects.includes(selectedProject)) {
         setSelectedProject(projects[0]);
       }
+    }
+    if (!receiptsRes.error && receiptsRes.data) {
+      setReceipts(receiptsRes.data);
     }
     setLoading(false);
   };
 
   useEffect(() => {
-    fetchUnits();
+    fetchAllData();
   }, []);
 
   const projectsList = useMemo(() => {
@@ -90,7 +123,10 @@ export default function RealEstateSalesPage() {
     return units.filter((u) => u.project_name === selectedProject);
   }, [units, selectedProject]);
 
-  // Summary Metrics
+  const projectReceipts = useMemo(() => {
+    return receipts.filter((r) => r.project_name === selectedProject);
+  }, [receipts, selectedProject]);
+
   const stats = useMemo(() => {
     const total = projectUnits.length;
     const booked = projectUnits.filter((u) => u.status === 'Booked').length;
@@ -126,7 +162,6 @@ export default function RealEstateSalesPage() {
     };
   }, [projectUnits]);
 
-  // Group Units Floor-Wise
   const floorGroups = useMemo(() => {
     const filtered = projectUnits.filter((u) => {
       const matchType = typeFilter === 'ALL' || u.unit_type === typeFilter;
@@ -155,6 +190,7 @@ export default function RealEstateSalesPage() {
     if (!activeUnit) return;
     setSavingBooking(true);
 
+    const paidAmt = Number(amountReceived || 0);
     const { error } = await supabase
       .from('real_estate_units')
       .update({
@@ -162,16 +198,32 @@ export default function RealEstateSalesPage() {
         customer_name: customerName.trim(),
         customer_phone: customerPhone.trim(),
         booking_date: bookingDate,
-        amount_received: Number(amountReceived || 0),
+        amount_received: paidAmt,
       })
       .eq('id', activeUnit.id);
+
+    // Also auto-log receipt if initial booking amount > 0 and newly booked
+    if (!error && activeUnit.status === 'Available' && paidAmt > 0) {
+      const recNo = `UE-REC-${Math.floor(100000 + Math.random() * 900000)}`;
+      await supabase.from('customer_receipts').insert([
+        {
+          receipt_no: recNo,
+          project_name: activeUnit.project_name,
+          unit_number: activeUnit.unit_number,
+          customer_name: customerName.trim(),
+          payment_mode: 'Booking Advance',
+          amount_received: paidAmt,
+          receipt_date: bookingDate,
+        },
+      ]);
+    }
 
     setSavingBooking(false);
     if (error) {
       alert('Booking error: ' + error.message);
     } else {
       setActiveUnit(null);
-      fetchUnits();
+      fetchAllData();
     }
   };
 
@@ -191,7 +243,7 @@ export default function RealEstateSalesPage() {
       .eq('id', activeUnit.id);
 
     setActiveUnit(null);
-    fetchUnits();
+    fetchAllData();
   };
 
   const handleAddUnit = async (e: React.FormEvent) => {
@@ -215,8 +267,51 @@ export default function RealEstateSalesPage() {
       setShowAddModal(false);
       setNewUnitNo('');
       setSelectedProject(newProject.trim());
-      fetchUnits();
+      fetchAllData();
     }
+  };
+
+  const handleRecordReceipt = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const amt = Number(recAmount || 0);
+    if (amt <= 0) return;
+
+    const recNo = `UE-REC-${Math.floor(100000 + Math.random() * 900000)}`;
+    const { error } = await supabase.from('customer_receipts').insert([
+      {
+        receipt_no: recNo,
+        project_name: selectedProject,
+        unit_number: recUnitNo,
+        customer_name: recCustomerName.trim(),
+        payment_mode: recPaymentMode,
+        transaction_ref: recRefNo.trim(),
+        amount_received: amt,
+        receipt_date: recDate,
+      },
+    ]);
+
+    if (error) {
+      alert('Receipt Error: ' + error.message);
+      return;
+    }
+
+    // Update total received on that unit automatically
+    const matchedUnit = projectUnits.find((u) => u.unit_number === recUnitNo);
+    if (matchedUnit) {
+      await supabase
+        .from('real_estate_units')
+        .update({
+          status: 'Booked',
+          customer_name: matchedUnit.customer_name || recCustomerName.trim(),
+          amount_received: Number(matchedUnit.amount_received || 0) + amt,
+        })
+        .eq('id', matchedUnit.id);
+    }
+
+    setShowReceiptModal(false);
+    setRecAmount('');
+    setRecRefNo('');
+    fetchAllData();
   };
 
   const formatINR = (val: number) =>
@@ -232,17 +327,17 @@ export default function RealEstateSalesPage() {
       <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
         <div>
           <span className="text-xs font-bold uppercase tracking-wider text-blue-700">
-            Real Estate Sales &amp; Inventory Matrix
+            Real Estate Sales &amp; Customer Receipts
           </span>
           <h1 className="text-2xl font-black text-slate-900 mt-0.5">
-            Project &amp; Floor-Wise Unit Availability
+            Project Inventory, Bookings &amp; Payment Receipts
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            Live tracking of Flats, Shops &amp; Offices — Booked vs. Vacant status per floor
+            Floor-wise Flats, Shops &amp; Offices availability + Customer Payment Receipts
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
+        <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto">
           <select
             value={selectedProject}
             onChange={(e) => setSelectedProject(e.target.value)}
@@ -265,6 +360,21 @@ export default function RealEstateSalesPage() {
             <Plus className="w-4 h-4" />
             Add Flat / Shop / Office
           </button>
+
+          <button
+            onClick={() => {
+              const firstBooked = projectUnits.find((u) => u.status === 'Booked') || projectUnits[0];
+              if (firstBooked) {
+                setRecUnitNo(firstBooked.unit_number);
+                setRecCustomerName(firstBooked.customer_name || '');
+              }
+              setShowReceiptModal(true);
+            }}
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs rounded-lg shadow cursor-pointer"
+          >
+            <Receipt className="w-4 h-4" />
+            + Record Customer Receipt
+          </button>
         </div>
       </div>
 
@@ -285,7 +395,7 @@ export default function RealEstateSalesPage() {
 
         <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
           <div className="flex items-center justify-between text-xs font-bold text-slate-500 uppercase">
-            <span>Flats (Residential)</span>
+            <span>Flats</span>
             <Home className="w-4 h-4 text-blue-700" />
           </div>
           <div className="text-2xl font-black text-slate-900 mt-1">{stats.flatsTotal}</div>
@@ -297,7 +407,7 @@ export default function RealEstateSalesPage() {
 
         <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
           <div className="flex items-center justify-between text-xs font-bold text-slate-500 uppercase">
-            <span>Shops (Commercial)</span>
+            <span>Shops</span>
             <Store className="w-4 h-4 text-amber-600" />
           </div>
           <div className="text-2xl font-black text-slate-900 mt-1">{stats.shopsTotal}</div>
@@ -309,7 +419,7 @@ export default function RealEstateSalesPage() {
 
         <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
           <div className="flex items-center justify-between text-xs font-bold text-slate-500 uppercase">
-            <span>Offices (Corporate)</span>
+            <span>Offices</span>
             <Briefcase className="w-4 h-4 text-indigo-600" />
           </div>
           <div className="text-2xl font-black text-slate-900 mt-1">{stats.officesTotal}</div>
@@ -375,10 +485,6 @@ export default function RealEstateSalesPage() {
         <div className="bg-white border border-slate-200 rounded-xl p-10 text-center text-sm text-slate-500">
           Loading project inventory...
         </div>
-      ) : Object.keys(floorGroups).length === 0 ? (
-        <div className="bg-white border border-slate-200 rounded-xl p-10 text-center text-sm text-slate-500">
-          Is filter mein koi unit nahi mili. Upar &quot;Add Flat / Shop / Office&quot; se units jodein.
-        </div>
       ) : (
         <div className="space-y-5">
           {Object.entries(floorGroups).map(([floorName, items]) => {
@@ -390,7 +496,6 @@ export default function RealEstateSalesPage() {
                 key={floorName}
                 className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden"
               >
-                {/* Floor Header */}
                 <div className="px-5 py-3.5 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <Building2 className="w-4 h-4 text-blue-800" />
@@ -410,7 +515,6 @@ export default function RealEstateSalesPage() {
                   </div>
                 </div>
 
-                {/* Floor Units Grid */}
                 <div className="p-5 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                   {items.map((unit) => {
                     const isBooked = unit.status === 'Booked';
@@ -480,6 +584,66 @@ export default function RealEstateSalesPage() {
         </div>
       )}
 
+      {/* Customer Payment Receipts Ledger Table */}
+      <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+        <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-black text-slate-900 uppercase">
+              Customer Payment Receipts ({selectedProject})
+            </h3>
+            <p className="text-xs text-slate-500">
+              All installment &amp; booking receipts recorded against Flats, Shops &amp; Offices
+            </p>
+          </div>
+          <button
+            onClick={() => window.print()}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-700 hover:bg-slate-100 cursor-pointer"
+          >
+            <Printer className="w-3.5 h-3.5" />
+            Print Register
+          </button>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr className="bg-slate-100 text-slate-700 font-bold uppercase border-b border-slate-200">
+                <th className="py-3 px-4">Receipt No</th>
+                <th className="py-3 px-4">Date</th>
+                <th className="py-3 px-4">Unit No</th>
+                <th className="py-3 px-4">Customer Name</th>
+                <th className="py-3 px-4">Payment Mode</th>
+                <th className="py-3 px-4 text-right">Amount Received</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200">
+              {projectReceipts.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-slate-500">
+                    No customer receipts recorded yet. Click &quot;+ Record Customer Receipt&quot; above to add one.
+                  </td>
+                </tr>
+              ) : (
+                projectReceipts.map((r) => (
+                  <tr key={r.id} className="hover:bg-slate-50">
+                    <td className="py-3 px-4 font-mono font-bold text-blue-800">{r.receipt_no}</td>
+                    <td className="py-3 px-4 text-slate-600">{r.receipt_date}</td>
+                    <td className="py-3 px-4 font-extrabold text-slate-900">{r.unit_number}</td>
+                    <td className="py-3 px-4 font-bold text-slate-800">{r.customer_name}</td>
+                    <td className="py-3 px-4 text-slate-600">
+                      {r.payment_mode} {r.transaction_ref ? `(${r.transaction_ref})` : ''}
+                    </td>
+                    <td className="py-3 px-4 text-right font-black text-emerald-700">
+                      {formatINR(Number(r.amount_received || 0))}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       {/* Unit Booking / Edit Modal */}
       {activeUnit && (
         <div className="fixed inset-0 z-50 bg-slate-950/60 flex items-center justify-center p-4">
@@ -509,7 +673,6 @@ export default function RealEstateSalesPage() {
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Mohammad Irfan"
                   value={customerName}
                   onChange={(e) => setCustomerName(e.target.value)}
                   className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm font-semibold text-slate-900"
@@ -523,7 +686,6 @@ export default function RealEstateSalesPage() {
                 <input
                   type="text"
                   required
-                  placeholder="e.g. 9835012345"
                   value={customerPhone}
                   onChange={(e) => setCustomerPhone(e.target.value)}
                   className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm font-semibold text-slate-900"
@@ -533,11 +695,10 @@ export default function RealEstateSalesPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Booking Amount Received (₹)
+                    Amount Received (₹)
                   </label>
                   <input
                     type="number"
-                    placeholder="e.g. 500000"
                     value={amountReceived}
                     onChange={(e) => setAmountReceived(e.target.value)}
                     className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm font-semibold text-slate-900"
@@ -572,6 +733,115 @@ export default function RealEstateSalesPage() {
                   className="ml-auto px-5 py-2.5 bg-blue-800 hover:bg-blue-900 text-white font-bold text-xs rounded-lg shadow cursor-pointer"
                 >
                   {savingBooking ? 'Saving...' : 'Confirm & Save Booking'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Record Customer Receipt Modal */}
+      {showReceiptModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="text-lg font-black text-slate-900">
+                Record Customer Payment Receipt
+              </h3>
+              <button
+                onClick={() => setShowReceiptModal(false)}
+                className="p-1.5 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleRecordReceipt} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Select Unit No *</label>
+                <select
+                  value={recUnitNo}
+                  onChange={(e) => {
+                    setRecUnitNo(e.target.value);
+                    const found = projectUnits.find((u) => u.unit_number === e.target.value);
+                    if (found?.customer_name) setRecCustomerName(found.customer_name);
+                  }}
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm font-semibold text-slate-900"
+                >
+                  {projectUnits.map((u) => (
+                    <option key={u.id} value={u.unit_number}>
+                      {u.unit_number} ({u.unit_type} - {u.floor_no})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Customer Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={recCustomerName}
+                  onChange={(e) => setRecCustomerName(e.target.value)}
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm font-semibold text-slate-900"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Payment Mode *</label>
+                  <select
+                    value={recPaymentMode}
+                    onChange={(e) => setRecPaymentMode(e.target.value)}
+                    className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm font-semibold text-slate-900"
+                  >
+                    <option value="NEFT / RTGS">NEFT / RTGS</option>
+                    <option value="Cheque">Cheque</option>
+                    <option value="UPI / Online">UPI / Online</option>
+                    <option value="Cash">Cash</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Amount (₹) *</label>
+                  <input
+                    type="number"
+                    required
+                    placeholder="e.g. 500000"
+                    value={recAmount}
+                    onChange={(e) => setRecAmount(e.target.value)}
+                    className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm font-semibold text-slate-900"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">UTR / Cheque No</label>
+                  <input
+                    type="text"
+                    placeholder="Optional ref no"
+                    value={recRefNo}
+                    onChange={(e) => setRecRefNo(e.target.value)}
+                    className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm font-semibold text-slate-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Receipt Date</label>
+                  <input
+                    type="date"
+                    value={recDate}
+                    onChange={(e) => setRecDate(e.target.value)}
+                    className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm font-semibold text-slate-900"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2 flex justify-end">
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs rounded-lg shadow cursor-pointer"
+                >
+                  Save Customer Receipt
                 </button>
               </div>
             </form>
