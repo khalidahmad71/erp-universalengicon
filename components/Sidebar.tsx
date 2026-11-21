@@ -92,11 +92,10 @@ export default function Sidebar() {
   const [userEmail, setUserEmail] = useState<string>('');
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  if (pathname === '/login' || pathname === '/') {
-    return null;
-  }
-
+  // Hooks हमेशा conditional return से पहले होने चाहिए
   useEffect(() => {
+    if (pathname === '/login' || pathname === '/') return;
+
     const fetchUserRole = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
@@ -113,7 +112,11 @@ export default function Sidebar() {
       }
     };
     fetchUserRole();
-  }, []);
+  }, [pathname]);
+
+  if (pathname === '/login' || pathname === '/') {
+    return null;
+  }
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -125,7 +128,7 @@ export default function Sidebar() {
   return (
     <>
       {/* Mobile Header Toggle */}
-      <div className="lg:hidden flex items-center justify-between bg-white border-b border-slate-200 px-4 py-3 sticky top-0 z-40 shadow-sm">
+      <div className="lg:hidden flex items-center justify-between bg-white border-b border-slate-200 px-4 py-3 sticky top-0 z-40 shadow-sm print:hidden">
         <div>
           <span className="font-extrabold text-slate-900 tracking-tight text-base">UNIVERSAL ENGICON</span>
           <span className="block text-[10px] font-semibold text-blue-700 uppercase">Enterprise ERP</span>
@@ -140,7 +143,7 @@ export default function Sidebar() {
 
       {/* Sidebar Container */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 w-68 bg-slate-50 border-r border-slate-200 flex flex-col transition-transform duration-200 ease-in-out lg:static lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-50 w-68 bg-slate-50 border-r border-slate-200 flex flex-col transition-transform duration-200 ease-in-out lg:static lg:translate-x-0 print:hidden ${
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -193,7 +196,7 @@ export default function Sidebar() {
             );
           })}
         </nav>
-s
+
         {/* Logout Footer */}
         <div className="p-3 bg-white border-t border-slate-200">
           <button
