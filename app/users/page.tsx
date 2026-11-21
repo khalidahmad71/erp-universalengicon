@@ -2,7 +2,16 @@
 
 import React, { useEffect, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { UserPlus, Shield, Building2, Trash2, CheckCircle2, XCircle } from 'lucide-react';
+import {
+  UserPlus,
+  Shield,
+  Building2,
+  Trash2,
+  CheckCircle2,
+  XCircle,
+  AlertTriangle,
+  KeyRound,
+} from 'lucide-react';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -18,6 +27,9 @@ interface EnterpriseUser {
   password_hash: string;
   assigned_site: string;
   is_active: boolean;
+  failed_attempts?: number;
+  reset_requested?: boolean;
+  reset_requested_at?: string;
 }
 
 const DEPARTMENTS = [
@@ -42,6 +54,9 @@ export default function DepartmentUsersPage() {
   const [department, setDepartment] = useState('Civil Engineering & Projects');
   const [roleDesignation, setRoleDesignation] = useState('Site Engineer');
   const [assignedSite, setAssignedSite] = useState('Godrej Zen Estate Phase-2');
+
+  // Inline Password Reset State
+  const [newPasswords, setNewPasswords] = useState<Record<string, string>>({});
 
   const fetchUsers = async () => {
     setLoading(true);
@@ -81,6 +96,8 @@ export default function DepartmentUsersPage() {
           assigned_site: assignedSite,
           access_level: roleDesignation === 'Managing Director' ? 1 : 2,
           is_active: true,
+          failed_attempts: 0,
+          reset_requested: false,
         },
       ],
       { onConflict: 'user_email' }
@@ -97,10 +114,40 @@ export default function DepartmentUsersPage() {
     }
   };
 
+  const handleResetAndUnlock = async (user: EnterpriseUser) => {
+    const updatedPwd = (newPasswords[user.id] || 'Universal@2026').trim();
+    if (!updatedPwd) {
+      alert('Please enter a new password.');
+      return;
+    }
+
+    await supabase
+      .from('enterprise_users')
+      .update({
+        password_hash: updatedPwd,
+        is_active: true,
+        failed_attempts: 0,
+        reset_requested: false,
+      })
+      .eq('id', user.id);
+
+    await supabase
+      .from('password_reset_requests')
+      .update({ status: 'Resolved' })
+      .eq('user_email', user.user_email)
+      .eq('status', 'Pending');
+
+    alert(`Password updated & account unlocked for ${user.full_name} (${user.department})!`);
+    fetchUsers();
+  };
+
   const toggleUserStatus = async (user: EnterpriseUser) => {
     await supabase
       .from('enterprise_users')
-      .update({ is_active: !user.is_active })
+      .update({
+        is_active: !user.is_active,
+        failed_attempts: !user.is_active ? 0 : user.failed_attempts,
+      })
       .eq('id', user.id);
     fetchUsers();
   };
@@ -115,6 +162,8 @@ export default function DepartmentUsersPage() {
     fetchUsers();
   };
 
+  const pendingResetUsers = users.filter((u) => u.reset_requested || !u.is_active);
+
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
       {/* Header */}
@@ -127,13 +176,66 @@ export default function DepartmentUsersPage() {
             Department-Wise User Management
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            Create department logins for Site Engineers, Accountants, Store Keepers &amp; Sales Staff
+            Create department logins, monitor 3-attempt lockouts &amp; approve password resets
           </p>
         </div>
         <div className="bg-blue-50 border border-blue-200 px-4 py-2 rounded-lg text-xs font-bold text-blue-900">
           Total Active Users: {users.filter((u) => u.is_active).length}
         </div>
       </div>
+
+      {/* Department Password Reset & Lockout Requests Alert Panel */}
+      {pendingResetUsers.length > 0 && (
+        <div className="bg-rose-50 border-2 border-rose-300 rounded-xl p-5 shadow-sm space-y-3">
+          <div className="flex items-center gap-2 text-rose-800 font-black text-sm uppercase">
+            <AlertTriangle className="w-5 h-5 text-rose-600" />
+            Department Password Reset &amp; Lockout Requests ({pendingResetUsers.length})
+          </div>
+          <p className="text-xs text-rose-700">
+            The following staff accounts triggered a password reset request (3 failed login attempts or manual request). Set a new password below to unlock:
+          </p>
+
+          <div className="space-y-2.5 pt-1">
+            {pendingResetUsers.map((u) => (
+              <div
+                key={u.id}
+                className="bg-white border border-rose-200 rounded-lg p-3.5 flex flex-col md:flex-row items-start md:items-center justify-between gap-3"
+              >
+                <div>
+                  <div className="font-bold text-slate-900 text-sm">
+                    {u.full_name}{' '}
+                    <span className="text-xs font-semibold text-blue-700">
+                      ({u.department} • {u.role_designation})
+                    </span>
+                  </div>
+                  <div className="text-xs text-slate-500 font-mono">
+                    {u.user_email} • Failed Attempts: {u.failed_attempts || 0}/3
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 w-full md:w-auto">
+                  <input
+                    type="text"
+                    placeholder="New Password (e.g. Eng@2026)"
+                    value={newPasswords[u.id] ?? 'Universal@2026'}
+                    onChange={(e) =>
+                      setNewPasswords({ ...newPasswords, [u.id]: e.target.value })
+                    }
+                    className="px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono font-bold text-slate-900 w-48"
+                  />
+                  <button
+                    onClick={() => handleResetAndUnlock(u)}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs rounded-lg shadow cursor-pointer shrink-0"
+                  >
+                    <KeyRound className="w-3.5 h-3.5" />
+                    Reset &amp; Unlock
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Create Department User Form */}
       <form
@@ -295,7 +397,7 @@ export default function DepartmentUsersPage() {
                           </>
                         ) : (
                           <>
-                            <XCircle className="w-3.5 h-3.5" /> Disabled
+                            <XCircle className="w-3.5 h-3.5" /> Locked
                           </>
                         )}
                       </button>

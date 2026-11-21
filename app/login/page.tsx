@@ -9,22 +9,48 @@ const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabase
 
 export default function EnterpriseLoginModule() {
   const [email, setEmail] = useState('md@universalengicon.com');
-  const [password, setPassword] = useState('Universal@2026');
+  const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [infoMsg, setInfoMsg] = useState('');
+
+  const triggerDepartmentResetRequest = async (userRecord: any, reasonText: string) => {
+    if (!supabase) return;
+
+    await supabase
+      .from('enterprise_users')
+      .update({
+        reset_requested: true,
+        reset_requested_at: new Date().toISOString(),
+      })
+      .eq('id', userRecord.id);
+
+    await supabase.from('password_reset_requests').insert([
+      {
+        user_email: userRecord.user_email,
+        full_name: userRecord.full_name,
+        department: userRecord.department || 'General',
+        role_designation: userRecord.role_designation,
+        reason: reasonText,
+        status: 'Pending',
+      },
+    ]);
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setErrorMsg('');
+    setInfoMsg('');
 
     try {
       if (!supabase) throw new Error('Database connection missing');
 
+      const cleanEmail = email.trim().toLowerCase();
       const { data: userRecord, error } = await supabase
         .from('enterprise_users')
         .select('*')
-        .eq('user_email', email.trim().toLowerCase())
+        .eq('user_email', cleanEmail)
         .single();
 
       if (error || !userRecord) {
@@ -34,18 +60,60 @@ export default function EnterpriseLoginModule() {
       }
 
       if (!userRecord.is_active) {
-        setErrorMsg('Your account is currently disabled. Contact Management.');
+        setErrorMsg(
+          `Account Locked! Password reset request is already sent to ${userRecord.department} / Admin.`
+        );
         setIsLoading(false);
         return;
       }
 
+      // Check Password
       if (userRecord.password_hash !== password) {
-        setErrorMsg('Invalid password. Please check your credentials.');
+        const nextAttempts = (userRecord.failed_attempts || 0) + 1;
+
+        if (nextAttempts >= 3) {
+          // 3rd wrong attempt -> Lock account & trigger reset request to Department
+          await supabase
+            .from('enterprise_users')
+            .update({
+              failed_attempts: nextAttempts,
+              is_active: false,
+              reset_requested: true,
+              reset_requested_at: new Date().toISOString(),
+            })
+            .eq('id', userRecord.id);
+
+          await triggerDepartmentResetRequest(
+            userRecord,
+            '3 Failed Login Attempts - Auto Lockout Trigger'
+          );
+
+          setErrorMsg(
+            `3 wrong password attempts! Account locked & automatic password reset request sent to ${userRecord.department} Head & Admin.`
+          );
+        } else {
+          await supabase
+            .from('enterprise_users')
+            .update({ failed_attempts: nextAttempts })
+            .eq('id', userRecord.id);
+
+          setErrorMsg(
+            `Invalid password (Attempt ${nextAttempts} of 3). After 3 failed attempts, reset request will be sent to ${userRecord.department}.`
+          );
+        }
+
         setIsLoading(false);
         return;
       }
 
-      // Set clean enterprise session cookies with exact Department & Role
+      // Valid Login -> Reset failed_attempts to 0
+      if ((userRecord.failed_attempts || 0) > 0) {
+        await supabase
+          .from('enterprise_users')
+          .update({ failed_attempts: 0 })
+          .eq('id', userRecord.id);
+      }
+
       document.cookie = 'sb-access-token=; path=/; max-age=0';
       document.cookie = `ue_session=${encodeURIComponent(userRecord.user_email)}; path=/; max-age=86400; SameSite=Lax`;
       document.cookie = `ue_role=${encodeURIComponent(userRecord.role_designation)}; path=/; max-age=86400; SameSite=Lax`;
@@ -56,6 +124,41 @@ export default function EnterpriseLoginModule() {
       setErrorMsg(err?.message || 'Login failed. Please try again.');
       setIsLoading(false);
     }
+  };
+
+  const handleManualForgotPassword = async () => {
+    setErrorMsg('');
+    setInfoMsg('');
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) {
+      setErrorMsg('Please enter your Department / Corporate Email first.');
+      return;
+    }
+
+    if (!supabase) return;
+    setIsLoading(true);
+
+    const { data: userRecord } = await supabase
+      .from('enterprise_users')
+      .select('*')
+      .eq('user_email', cleanEmail)
+      .single();
+
+    if (!userRecord) {
+      setErrorMsg('Email not found in Universal Engicon directory.');
+      setIsLoading(false);
+      return;
+    }
+
+    await triggerDepartmentResetRequest(
+      userRecord,
+      'Manual Forgot Password Request by Staff'
+    );
+
+    setIsLoading(false);
+    setInfoMsg(
+      `Password reset request sent to ${userRecord.department} Department & Admin. They will share your new password shortly.`
+    );
   };
 
   return (
@@ -74,8 +177,14 @@ export default function EnterpriseLoginModule() {
         </div>
 
         {errorMsg && (
-          <div className="mb-5 p-3.5 rounded-xl bg-rose-950/80 border border-rose-500 text-rose-200 text-xs font-semibold">
+          <div className="mb-5 p-3.5 rounded-xl bg-rose-950/80 border border-rose-500 text-rose-200 text-xs font-semibold leading-relaxed">
             {errorMsg}
+          </div>
+        )}
+
+        {infoMsg && (
+          <div className="mb-5 p-3.5 rounded-xl bg-emerald-950/80 border border-emerald-500 text-emerald-200 text-xs font-semibold leading-relaxed">
+            {infoMsg}
           </div>
         )}
 
@@ -94,11 +203,21 @@ export default function EnterpriseLoginModule() {
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-400 uppercase mb-1">
-              Secure Password
-            </label>
+            <div className="flex justify-between items-center mb-1">
+              <label className="block text-xs font-bold text-slate-400 uppercase">
+                Secure Password
+              </label>
+              <button
+                type="button"
+                onClick={handleManualForgotPassword}
+                className="text-[11px] font-bold text-blue-400 hover:text-blue-300 cursor-pointer"
+              >
+                Forgot Password?
+              </button>
+            </div>
             <input
               type="password"
+              placeholder="Enter your ERP password"
               className="w-full p-3.5 bg-slate-800 border border-slate-700 rounded-xl font-bold text-white text-sm focus:outline-none focus:border-blue-500"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
