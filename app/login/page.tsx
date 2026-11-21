@@ -14,7 +14,7 @@ try {
 
 export default function EnterpriseLoginModule() {
   const [email, setEmail] = useState('md@universalengicon.com');
-  const [password, setPassword] = useState('••••••••••••');
+  const [password, setPassword] = useState('Universal@2026');
   const [role, setRole] = useState('Managing Director');
   const [isLoading, setIsLoading] = useState(false);
   const [loginSuccess, setLoginSuccess] = useState(false);
@@ -38,14 +38,16 @@ export default function EnterpriseLoginModule() {
       console.error(err);
     }
 
-    // Clear old token and set clean enterprise session cookies
+    // Set clean enterprise session cookies
     document.cookie = 'sb-access-token=; path=/; max-age=0';
     document.cookie = `ue_session=${encodeURIComponent(email)}; path=/; max-age=86400; SameSite=Lax`;
     document.cookie = `ue_role=${encodeURIComponent(role)}; path=/; max-age=86400; SameSite=Lax`;
 
     setIsLoading(false);
     setLoginSuccess(true);
-    window.location.href = '/';
+
+    // सीधा Dashboard पर भेजें ('/' पर नहीं)
+    window.location.href = '/dashboard';
   };
 
   return (
@@ -70,7 +72,7 @@ export default function EnterpriseLoginModule() {
               Welcome back, {role}. Redirecting to Enterprise Dashboard...
             </p>
             <a
-              href="/"
+              href="/dashboard"
               className="inline-block w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3 rounded-xl transition uppercase tracking-wider text-xs"
             >
               Proceed to ERP Dashboard →
@@ -118,11 +120,12 @@ export default function EnterpriseLoginModule() {
                 <option value="Accounts Manager">Accounts Manager (GST, P&amp;L, Payroll)</option>
                 <option value="Store Keeper">Store Keeper (GRN &amp; Inventory)</option>
               </select>
-            </div>router.push('/dashboard');
+            </div>
+
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-4 rounded-xl shadow-lg transition uppercase tracking-wider text-sm mt-2"
+              className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-4 rounded-xl shadow-lg transition uppercase tracking-wider text-sm mt-2 cursor-pointer"
             >
               {isLoading ? 'Verifying Credentials...' : '🔒 Secure Login to ERP'}
             </button>
