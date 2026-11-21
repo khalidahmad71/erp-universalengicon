@@ -1,191 +1,323 @@
-'use client'
+'use client';
 
-import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase'
-import { Shield, UserCheck, UserX, RefreshCw } from 'lucide-react'
+import React, { useEffect, useState } from 'react';
+import { createClient } from '@supabase/supabase-js';
+import { UserPlus, Shield, Building2, Trash2, CheckCircle2, XCircle } from 'lucide-react';
 
-interface UserProfile {
-  id: string
-  full_name: string
-  email: string
-  role: 'admin' | 'site_engineer' | 'accountant'
-  is_active: boolean
-  created_at: string
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
+
+interface EnterpriseUser {
+  id: string;
+  user_email: string;
+  full_name: string;
+  department: string;
+  role_designation: string;
+  password_hash: string;
+  assigned_site: string;
+  is_active: boolean;
 }
 
-export default function UserManagementPage() {
-  const [users, setUsers] = useState<UserProfile[]>([])
-  const [loading, setLoading] = useState(true)
-  const [updatingId, setUpdatingId] = useState<string | null>(null)
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+const DEPARTMENTS = [
+  { name: 'Management & MD Office', defaultRole: 'Managing Director' },
+  { name: 'Civil Engineering & Projects', defaultRole: 'Site Engineer' },
+  { name: 'Accounts & Finance', defaultRole: 'Accounts Manager' },
+  { name: 'Store & Inventory', defaultRole: 'Store Keeper' },
+  { name: 'Procurement & Contracts', defaultRole: 'Procurement Officer' },
+  { name: 'Real Estate Sales & CRM', defaultRole: 'Sales Manager' },
+  { name: 'HR & Site Administration', defaultRole: 'HR Admin' },
+];
+
+export default function DepartmentUsersPage() {
+  const [users, setUsers] = useState<EnterpriseUser[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  // Form States
+  const [fullName, setFullName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('Universal@2026');
+  const [department, setDepartment] = useState('Civil Engineering & Projects');
+  const [roleDesignation, setRoleDesignation] = useState('Site Engineer');
+  const [assignedSite, setAssignedSite] = useState('Godrej Zen Estate Phase-2');
 
   const fetchUsers = async () => {
-    setLoading(true)
+    setLoading(true);
     const { data, error } = await supabase
-      .from('user_profiles')
+      .from('enterprise_users')
       .select('*')
-      .order('created_at', { ascending: false })
+      .order('created_at', { ascending: false });
 
-    if (error) {
-      setMessage({ type: 'error', text: `Error loading staff: ${error.message}` })
-    } else {
-      setUsers(data || [])
+    if (!error && data) {
+      setUsers(data);
     }
-    setLoading(false)
-  }
+    setLoading(false);
+  };
 
   useEffect(() => {
-    fetchUsers()
-  }, [])
+    fetchUsers();
+  }, []);
 
-  const handleRoleChange = async (userId: string, newRole: 'admin' | 'site_engineer' | 'accountant') => {
-    setUpdatingId(userId)
-    setMessage(null)
-    const { error } = await supabase
-      .from('user_profiles')
-      .update({ role: newRole })
-      .eq('id', userId)
+  const handleDepartmentChange = (deptName: string) => {
+    setDepartment(deptName);
+    const found = DEPARTMENTS.find((d) => d.name === deptName);
+    if (found) setRoleDesignation(found.defaultRole);
+  };
 
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+
+    const { error } = await supabase.from('enterprise_users').upsert(
+      [
+        {
+          full_name: fullName.trim(),
+          user_email: email.trim().toLowerCase(),
+          password_hash: password,
+          department,
+          role_designation: roleDesignation,
+          assigned_site: assignedSite,
+          access_level: roleDesignation === 'Managing Director' ? 1 : 2,
+          is_active: true,
+        },
+      ],
+      { onConflict: 'user_email' }
+    );
+
+    setSaving(false);
     if (error) {
-      setMessage({ type: 'error', text: `Failed to update role: ${error.message}` })
+      alert('Error creating user: ' + error.message);
     } else {
-      setUsers(users.map(u => (u.id === userId ? { ...u, role: newRole } : u)))
-      setMessage({ type: 'success', text: 'Staff role updated successfully.' })
+      setFullName('');
+      setEmail('');
+      setPassword('Universal@2026');
+      fetchUsers();
     }
-    setUpdatingId(null)
-  }
+  };
 
-  const toggleActiveStatus = async (userId: string, currentStatus: boolean) => {
-    setUpdatingId(userId)
-    setMessage(null)
-    const { error } = await supabase
-      .from('user_profiles')
-      .update({ is_active: !currentStatus })
-      .eq('id', userId)
+  const toggleUserStatus = async (user: EnterpriseUser) => {
+    await supabase
+      .from('enterprise_users')
+      .update({ is_active: !user.is_active })
+      .eq('id', user.id);
+    fetchUsers();
+  };
 
-    if (error) {
-      setMessage({ type: 'error', text: `Failed to update status: ${error.message}` })
-    } else {
-      setUsers(users.map(u => (u.id === userId ? { ...u, is_active: !currentStatus } : u)))
-      setMessage({ type: 'success', text: `Account ${!currentStatus ? 'activated' : 'deactivated'}.` })
+  const deleteUser = async (id: string, userEmail: string) => {
+    if (userEmail === 'md@universalengicon.com') {
+      alert('Managing Director account cannot be deleted.');
+      return;
     }
-    setUpdatingId(null)
-  }
+    if (!confirm(`Delete user ${userEmail}?`)) return;
+    await supabase.from('enterprise_users').delete().eq('id', id);
+    fetchUsers();
+  };
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex justify-between items-center mb-6 border-b pb-4">
+    <div className="p-6 max-w-7xl mx-auto space-y-6">
+      {/* Header */}
+      <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-            <Shield className="w-6 h-6 text-blue-700" />
-            Access Control & Role Management
+          <span className="text-xs font-bold uppercase tracking-wider text-blue-700">
+            Access Control &amp; Staff Directory
+          </span>
+          <h1 className="text-2xl font-black text-slate-900 mt-0.5">
+            Department-Wise User Management
           </h1>
-          <p className="text-sm text-slate-600 mt-1">
-            Universal Engicon Pvt. Ltd. — Manage staff permissions and ERP access levels
+          <p className="text-xs text-slate-500 mt-1">
+            Create department logins for Site Engineers, Accountants, Store Keepers &amp; Sales Staff
           </p>
         </div>
-        <button
-          onClick={fetchUsers}
-          className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white text-sm font-medium rounded-lg transition-colors"
-        >
-          <RefreshCw className="w-4 h-4" />
-          Refresh List
-        </button>
+        <div className="bg-blue-50 border border-blue-200 px-4 py-2 rounded-lg text-xs font-bold text-blue-900">
+          Total Active Users: {users.filter((u) => u.is_active).length}
+        </div>
       </div>
 
-      {message && (
-        <div
-          className={`mb-4 p-3 rounded-lg text-sm font-medium ${
-            message.type === 'success'
-              ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-              : 'bg-red-50 text-red-800 border border-red-200'
-          }`}
-        >
-          {message.text}
-        </div>
-      )}
+      {/* Create Department User Form */}
+      <form
+        onSubmit={handleCreateUser}
+        className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-4"
+      >
+        <h2 className="text-sm font-extrabold uppercase tracking-wide text-slate-800 flex items-center gap-2 border-b border-slate-100 pb-3">
+          <UserPlus className="w-4 h-4 text-blue-700" />
+          Create New Department Login
+        </h2>
 
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">Full Name *</label>
+            <input
+              type="text"
+              placeholder="e.g. Rajesh Kumar"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              required
+              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm font-semibold text-slate-900 focus:bg-white focus:border-blue-600 focus:outline-none"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">Department *</label>
+            <select
+              value={department}
+              onChange={(e) => handleDepartmentChange(e.target.value)}
+              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm font-semibold text-slate-900 focus:bg-white focus:border-blue-600 focus:outline-none"
+            >
+              {DEPARTMENTS.map((dept) => (
+                <option key={dept.name} value={dept.name}>
+                  {dept.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">System Access Role *</label>
+            <select
+              value={roleDesignation}
+              onChange={(e) => setRoleDesignation(e.target.value)}
+              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm font-semibold text-slate-900 focus:bg-white focus:border-blue-600 focus:outline-none"
+            >
+              <option value="Managing Director">Managing Director (Full Access)</option>
+              <option value="Site Engineer">Site Engineer (Projects, BOQ, MR, DPR)</option>
+              <option value="Accounts Manager">Accounts Manager (Finance, GST, PO, RA)</option>
+              <option value="Store Keeper">Store Keeper (Store GRN, MR, PO)</option>
+              <option value="Procurement Officer">Procurement Officer (PO, Vendors, MR)</option>
+              <option value="Sales Manager">Sales Manager (Real Estate Sales)</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">Corporate Email (Login ID) *</label>
+            <input
+              type="email"
+              placeholder="e.g. accounts@universalengicon.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm font-semibold text-slate-900 focus:bg-white focus:border-blue-600 focus:outline-none"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">Login Password *</label>
+            <input
+              type="text"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm font-mono font-bold text-slate-900 focus:bg-white focus:border-blue-600 focus:outline-none"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">Assigned Site / Project</label>
+            <input
+              type="text"
+              placeholder="e.g. Godrej Zen Estate Phase-2"
+              value={assignedSite}
+              onChange={(e) => setAssignedSite(e.target.value)}
+              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm font-semibold text-slate-900 focus:bg-white focus:border-blue-600 focus:outline-none"
+            />
+          </div>
+        </div>
+
+        <div className="flex justify-end pt-2">
+          <button
+            type="submit"
+            disabled={saving}
+            className="px-6 py-2.5 bg-blue-800 hover:bg-blue-900 text-white font-bold text-sm rounded-lg shadow transition-colors cursor-pointer"
+          >
+            {saving ? 'Saving User...' : '+ Create Department User'}
+          </button>
+        </div>
+      </form>
+
+      {/* Department-Wise Users List */}
       <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-        <table className="w-full text-left border-collapse">
-          <thead>
-            <tr className="bg-slate-900 text-white text-xs uppercase tracking-wider">
-              <th className="py-3.5 px-4">Staff Name</th>
-              <th className="py-3.5 px-4">Official Email</th>
-              <th className="py-3.5 px-4">Assigned Role</th>
-              <th className="py-3.5 px-4">Status</th>
-              <th className="py-3.5 px-4 text-right">Action</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-200 text-sm">
-            {loading ? (
-              <tr>
-                <td colSpan={5} className="py-8 text-center text-slate-500">
-                  Loading staff profiles...
-                </td>
-              </tr>
-            ) : users.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="py-8 text-center text-slate-500">
-                  No staff profiles found.
-                </td>
-              </tr>
-            ) : (
-              users.map((staff) => (
-                <tr key={staff.id} className="hover:bg-slate-50 transition-colors">
-                  <td className="py-3.5 px-4 font-semibold text-slate-900">{staff.full_name}</td>
-                  <td className="py-3.5 px-4 text-slate-600">{staff.email}</td>
-                  <td className="py-3.5 px-4">
-                    <select
-                      disabled={updatingId === staff.id}
-                      value={staff.role}
-                      onChange={(e) =>
-                        handleRoleChange(staff.id, e.target.value as 'admin' | 'site_engineer' | 'accountant')
-                      }
-                      className="border border-slate-300 rounded-md px-3 py-1.5 text-sm font-medium bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-600"
-                    >
-                      <option value="admin">Admin (MD / Full Access)</option>
-                      <option value="site_engineer">Site Engineer (BOQ, DPR, Store, MB)</option>
-                      <option value="accountant">Accountant (Finance, GST, Billing, PO)</option>
-                    </select>
-                  </td>
-                  <td className="py-3.5 px-4">
-                    <span
-                      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                        staff.is_active
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : 'bg-red-100 text-red-800'
-                      }`}
-                    >
-                      {staff.is_active ? 'Active' : 'Disabled'}
-                    </span>
-                  </td>
-                  <td className="py-3.5 px-4 text-right">
-                    <button
-                      disabled={updatingId === staff.id}
-                      onClick={() => toggleActiveStatus(staff.id, staff.is_active)}
-                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold text-white transition-colors ${
-                        staff.is_active
-                          ? 'bg-rose-600 hover:bg-rose-700'
-                          : 'bg-emerald-600 hover:bg-emerald-700'
-                      }`}
-                    >
-                      {staff.is_active ? (
-                        <>
-                          <UserX className="w-3.5 h-3.5" /> Disable Access
-                        </>
-                      ) : (
-                        <>
-                          <UserCheck className="w-3.5 h-3.5" /> Activate
-                        </>
-                      )}
-                    </button>
-                  </td>
+        <div className="px-6 py-4 border-b border-slate-200 bg-slate-50">
+          <h3 className="text-sm font-extrabold text-slate-800 uppercase tracking-wide">
+            Registered Enterprise Users
+          </h3>
+        </div>
+
+        {loading ? (
+          <div className="p-8 text-center text-sm text-slate-500">Loading users...</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="bg-slate-100 text-slate-700 font-bold uppercase border-b border-slate-200">
+                  <th className="py-3 px-4">Employee &amp; Email</th>
+                  <th className="py-3 px-4">Department</th>
+                  <th className="py-3 px-4">ERP Role</th>
+                  <th className="py-3 px-4">Assigned Site</th>
+                  <th className="py-3 px-4">Password</th>
+                  <th className="py-3 px-4 text-center">Status</th>
+                  <th className="py-3 px-4 text-right">Action</th>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              </thead>
+              <tbody className="divide-y divide-slate-200">
+                {users.map((u) => (
+                  <tr key={u.id} className="hover:bg-slate-50">
+                    <td className="py-3 px-4">
+                      <div className="font-bold text-slate-900 text-sm">{u.full_name}</div>
+                      <div className="text-slate-500 font-mono">{u.user_email}</div>
+                    </td>
+                    <td className="py-3 px-4 font-semibold text-slate-800">
+                      <span className="inline-flex items-center gap-1.5">
+                        <Building2 className="w-3.5 h-3.5 text-blue-700" />
+                        {u.department || 'General'}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4">
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-blue-50 text-blue-800 font-bold border border-blue-200">
+                        <Shield className="w-3 h-3" />
+                        {u.role_designation}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4 text-slate-700 font-medium">{u.assigned_site || 'All Sites'}</td>
+                    <td className="py-3 px-4 font-mono text-slate-700">{u.password_hash}</td>
+                    <td className="py-3 px-4 text-center">
+                      <button
+                        onClick={() => toggleUserStatus(u)}
+                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-bold cursor-pointer ${
+                          u.is_active
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            : 'bg-rose-50 text-rose-700 border border-rose-200'
+                        }`}
+                      >
+                        {u.is_active ? (
+                          <>
+                            <CheckCircle2 className="w-3.5 h-3.5" /> Active
+                          </>
+                        ) : (
+                          <>
+                            <XCircle className="w-3.5 h-3.5" /> Disabled
+                          </>
+                        )}
+                      </button>
+                    </td>
+                    <td className="py-3 px-4 text-right">
+                      {u.user_email !== 'md@universalengicon.com' && (
+                        <button
+                          onClick={() => deleteUser(u.id, u.user_email)}
+                          className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                          title="Delete User"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
-  )
+  );
 }
