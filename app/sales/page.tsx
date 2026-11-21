@@ -1,10 +1,10 @@
+@'
 'use client';
 
 import React, { useEffect, useMemo, useState, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { createClient } from '@supabase/supabase-js';
 import {
-  Building2,
   Home,
   Store,
   Briefcase,
@@ -12,7 +12,6 @@ import {
   User,
   IndianRupee,
   X,
-  Receipt,
   Printer,
   Layers,
   Search,
@@ -56,7 +55,7 @@ interface CustomerReceipt {
 function RealEstateSalesContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const activeView = searchParams.get('view') || 'inventory'; // 'inventory' | 'new' | 'receipts'
+  const activeView = searchParams.get('view') || 'inventory';
 
   const [units, setUnits] = useState<RealEstateUnit[]>([]);
   const [receipts, setReceipts] = useState<CustomerReceipt[]>([]);
@@ -67,7 +66,6 @@ function RealEstateSalesContent() {
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Booking Modal State
   const [activeUnit, setActiveUnit] = useState<RealEstateUnit | null>(null);
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
@@ -75,7 +73,6 @@ function RealEstateSalesContent() {
   const [bookingDate, setBookingDate] = useState(new Date().toISOString().split('T')[0]);
   const [savingBooking, setSavingBooking] = useState(false);
 
-  // Record New Project / Unit Form State
   const [newProject, setNewProject] = useState('Godrej Zen Estate Phase-2');
   const [newFloor, setNewFloor] = useState('4th Floor');
   const [newUnitNo, setNewUnitNo] = useState('');
@@ -84,7 +81,6 @@ function RealEstateSalesContent() {
   const [newPrice, setNewPrice] = useState('9800000');
   const [savingNewUnit, setSavingNewUnit] = useState(false);
 
-  // Record Customer Receipt Form State
   const [recUnitNo, setRecUnitNo] = useState('');
   const [recCustomerName, setRecCustomerName] = useState('');
   const [recPaymentMode, setRecPaymentMode] = useState('NEFT / RTGS');
@@ -348,7 +344,6 @@ function RealEstateSalesContent() {
   return (
     <div className="min-h-screen bg-slate-50/70 p-6 lg:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
-        {/* Shared Project Selector Header */}
         <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
             <span className="text-[11px] font-bold uppercase tracking-wider text-blue-700">
@@ -379,12 +374,8 @@ function RealEstateSalesContent() {
           </div>
         </div>
 
-        {/* =====================================================================
-            VIEW 1: PROJECT AVAILABLE & BOOKED (SUB-MENU 1)
-           ===================================================================== */}
         {activeView === 'inventory' && (
           <>
-            {/* Executive Summary Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
               <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs">
                 <div className="flex items-center justify-between text-xs font-semibold text-slate-500">
@@ -451,7 +442,6 @@ function RealEstateSalesContent() {
               </div>
             </div>
 
-            {/* Clean Search & Filter Bar */}
             <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-2xs flex flex-wrap items-center justify-between gap-3">
               <div className="relative flex-1 min-w-[220px] max-w-sm">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -488,7 +478,6 @@ function RealEstateSalesContent() {
               </div>
             </div>
 
-            {/* Floor-Wise Unit Matrix */}
             {loading ? (
               <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center text-sm text-slate-500">
                 Loading project floor inventory...
@@ -629,9 +618,6 @@ function RealEstateSalesContent() {
           </>
         )}
 
-        {/* =====================================================================
-            VIEW 2: RECORD NEW PROJECT / UNIT (SUB-MENU 2)
-           ===================================================================== */}
         {activeView === 'new' && (
           <div className="max-w-2xl mx-auto bg-white border border-slate-200 rounded-2xl p-6 lg:p-8 shadow-xs space-y-6">
             <div className="border-b border-slate-100 pb-4 flex items-center gap-3">
@@ -656,7 +642,7 @@ function RealEstateSalesContent() {
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Godrej Zen Estate Phase-2 or Universal Heights"
+                  placeholder="e.g. Godrej Zen Estate Phase-2"
                   value={newProject}
                   onChange={(e) => setNewProject(e.target.value)}
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl text-sm font-bold text-slate-900 focus:bg-white focus:border-blue-700 focus:outline-none"
@@ -755,12 +741,8 @@ function RealEstateSalesContent() {
           </div>
         )}
 
-        {/* =====================================================================
-            VIEW 3: CUSTOMER PAYMENT RECEIPT (SUB-MENU 3)
-           ===================================================================== */}
         {activeView === 'receipts' && (
           <div className="space-y-6">
-            {/* Quick Payment Receipt Entry Card */}
             <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
               <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
                 <div>
@@ -857,7 +839,6 @@ function RealEstateSalesContent() {
               </form>
             </div>
 
-            {/* Receipts Ledger Table */}
             <div className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
               <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
                 <h3 className="text-sm font-extrabold text-slate-900">
@@ -919,7 +900,6 @@ function RealEstateSalesContent() {
         )}
       </div>
 
-      {/* Unit Booking / Edit Modal */}
       {activeUnit && (
         <div className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5">
@@ -1025,3 +1005,4 @@ export default function RealEstateSalesPage() {
     </Suspense>
   );
 }
+'@ | Set-Content -Path "app\sales\page.tsx" -Encoding UTF8
