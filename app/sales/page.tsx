@@ -1,264 +1,679 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import { supabase } from '../../lib/supabase';
-import OfficialPrintDocument from '../../components/OfficialPrintDocument';import { Home, Plus, Printer, X } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { createClient } from '@supabase/supabase-js';
+import {
+  Building2,
+  Home,
+  Store,
+  Briefcase,
+  CheckCircle2,
+  Plus,
+  Phone,
+  User,
+  IndianRupee,
+  X,
+} from 'lucide-react';
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
+
+interface RealEstateUnit {
+  id: string;
+  project_name: string;
+  floor_no: string;
+  unit_number: string;
+  unit_type: 'Flat' | 'Shop' | 'Office' | string;
+  area_sqft: number;
+  total_price: number;
+  status: 'Available' | 'Booked' | 'Hold' | string;
+  customer_name?: string | null;
+  customer_phone?: string | null;
+  booking_date?: string | null;
+  amount_received?: number;
+}
 
 export default function RealEstateSalesPage() {
-  const [bookings, setBookings] = useState<any[]>([]);
-  const [projects, setProjects] = useState<any[]>([]);
+  const [units, setUnits] = useState<RealEstateUnit[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [printReceipt, setPrintReceipt] = useState<any | null>(null);
+  const [selectedProject, setSelectedProject] = useState<string>('Godrej Zen Estate Phase-2');
+  const [typeFilter, setTypeFilter] = useState<string>('ALL');
+  const [statusFilter, setStatusFilter] = useState<string>('ALL');
 
-  const [form, setForm] = useState({
-    project_id: '',
-    unit_no: '',
-    unit_type: '3 BHK Residential Flat',
-    customer_name: '',
-    customer_phone: '',
-    customer_pan: '',
-    booking_amount: 0,
-    gst_percent: 5,
-    payment_mode: 'RTGS / NEFT',
-  });
+  // Booking Modal State
+  const [activeUnit, setActiveUnit] = useState<RealEstateUnit | null>(null);
+  const [customerName, setCustomerName] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [amountReceived, setAmountReceived] = useState('');
+  const [bookingDate, setBookingDate] = useState(new Date().toISOString().split('T')[0]);
+  const [savingBooking, setSavingBooking] = useState(false);
 
-  const fetchData = async () => {
+  // Add New Unit Modal State
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newProject, setNewProject] = useState('Godrej Zen Estate Phase-2');
+  const [newFloor, setNewFloor] = useState('4th Floor');
+  const [newUnitNo, setNewUnitNo] = useState('');
+  const [newUnitType, setNewUnitType] = useState<'Flat' | 'Shop' | 'Office'>('Flat');
+  const [newArea, setNewArea] = useState('1500');
+  const [newPrice, setNewPrice] = useState('9800000');
+
+  const fetchUnits = async () => {
     setLoading(true);
-    const [{ data: bookingData }, { data: projData }] = await Promise.all([
-      supabase.from('real_estate_bookings').select('*, projects(name)').order('created_at', { ascending: false }),
-      supabase.from('projects').select('id, name'),
-    ]);
-    if (bookingData) setBookings(bookingData);
-    if (projData) setProjects(projData);
+    const { data, error } = await supabase
+      .from('real_estate_units')
+      .select('*')
+      .order('floor_no', { ascending: true })
+      .order('unit_number', { ascending: true });
+
+    if (!error && data) {
+      setUnits(data);
+      const projects = Array.from(new Set(data.map((u) => u.project_name)));
+      if (projects.length > 0 && !projects.includes(selectedProject)) {
+        setSelectedProject(projects[0]);
+      }
+    }
     setLoading(false);
   };
 
   useEffect(() => {
-    fetchData();
+    fetchUnits();
   }, []);
 
-  const baseAmt = Number(form.booking_amount);
-  const gstAmt = (baseAmt * Number(form.gst_percent)) / 100;
-  const totalReceived = baseAmt + gstAmt;
+  const projectsList = useMemo(() => {
+    const list = Array.from(new Set(units.map((u) => u.project_name)));
+    return list.length > 0 ? list : ['Godrej Zen Estate Phase-2'];
+  }, [units]);
+
+  const projectUnits = useMemo(() => {
+    return units.filter((u) => u.project_name === selectedProject);
+  }, [units, selectedProject]);
+
+  // Summary Metrics
+  const stats = useMemo(() => {
+    const total = projectUnits.length;
+    const booked = projectUnits.filter((u) => u.status === 'Booked').length;
+    const available = projectUnits.filter((u) => u.status === 'Available').length;
+
+    const flatsTotal = projectUnits.filter((u) => u.unit_type === 'Flat').length;
+    const flatsBooked = projectUnits.filter((u) => u.unit_type === 'Flat' && u.status === 'Booked').length;
+
+    const shopsTotal = projectUnits.filter((u) => u.unit_type === 'Shop').length;
+    const shopsBooked = projectUnits.filter((u) => u.unit_type === 'Shop' && u.status === 'Booked').length;
+
+    const officesTotal = projectUnits.filter((u) => u.unit_type === 'Office').length;
+    const officesBooked = projectUnits.filter((u) => u.unit_type === 'Office' && u.status === 'Booked').length;
+
+    const totalRevenue = projectUnits
+      .filter((u) => u.status === 'Booked')
+      .reduce((acc, u) => acc + Number(u.total_price || 0), 0);
+
+    const totalCollected = projectUnits.reduce((acc, u) => acc + Number(u.amount_received || 0), 0);
+
+    return {
+      total,
+      booked,
+      available,
+      flatsTotal,
+      flatsBooked,
+      shopsTotal,
+      shopsBooked,
+      officesTotal,
+      officesBooked,
+      totalRevenue,
+      totalCollected,
+    };
+  }, [projectUnits]);
+
+  // Group Units Floor-Wise
+  const floorGroups = useMemo(() => {
+    const filtered = projectUnits.filter((u) => {
+      const matchType = typeFilter === 'ALL' || u.unit_type === typeFilter;
+      const matchStatus = statusFilter === 'ALL' || u.status === statusFilter;
+      return matchType && matchStatus;
+    });
+
+    const groups: Record<string, RealEstateUnit[]> = {};
+    filtered.forEach((u) => {
+      if (!groups[u.floor_no]) groups[u.floor_no] = [];
+      groups[u.floor_no].push(u);
+    });
+    return groups;
+  }, [projectUnits, typeFilter, statusFilter]);
+
+  const openUnitModal = (unit: RealEstateUnit) => {
+    setActiveUnit(unit);
+    setCustomerName(unit.customer_name || '');
+    setCustomerPhone(unit.customer_phone || '');
+    setAmountReceived(unit.amount_received ? String(unit.amount_received) : '');
+    setBookingDate(unit.booking_date || new Date().toISOString().split('T')[0]);
+  };
 
   const handleSaveBooking = async (e: React.FormEvent) => {
     e.preventDefault();
-    const { error } = await supabase.from('real_estate_bookings').insert([
+    if (!activeUnit) return;
+    setSavingBooking(true);
+
+    const { error } = await supabase
+      .from('real_estate_units')
+      .update({
+        status: 'Booked',
+        customer_name: customerName.trim(),
+        customer_phone: customerPhone.trim(),
+        booking_date: bookingDate,
+        amount_received: Number(amountReceived || 0),
+      })
+      .eq('id', activeUnit.id);
+
+    setSavingBooking(false);
+    if (error) {
+      alert('Booking error: ' + error.message);
+    } else {
+      setActiveUnit(null);
+      fetchUnits();
+    }
+  };
+
+  const handleCancelBooking = async () => {
+    if (!activeUnit) return;
+    if (!confirm(`Cancel booking for ${activeUnit.unit_number} and mark Available?`)) return;
+
+    await supabase
+      .from('real_estate_units')
+      .update({
+        status: 'Available',
+        customer_name: null,
+        customer_phone: null,
+        booking_date: null,
+        amount_received: 0,
+      })
+      .eq('id', activeUnit.id);
+
+    setActiveUnit(null);
+    fetchUnits();
+  };
+
+  const handleAddUnit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const { error } = await supabase.from('real_estate_units').insert([
       {
-        project_id: form.project_id ? Number(form.project_id) : null,
-        unit_no: form.unit_no,
-        unit_type: form.unit_type,
-        customer_name: form.customer_name,
-        customer_phone: form.customer_phone,
-        customer_pan: form.customer_pan,
-        booking_amount: totalReceived,
-        gst_amount: gstAmt,
-        payment_mode: form.payment_mode,
-        booking_date: new Date().toISOString().slice(0, 10),
+        project_name: newProject.trim(),
+        floor_no: newFloor.trim(),
+        unit_number: newUnitNo.trim(),
+        unit_type: newUnitType,
+        area_sqft: Number(newArea || 0),
+        total_price: Number(newPrice || 0),
+        status: 'Available',
+        amount_received: 0,
       },
     ]);
 
     if (error) {
-      alert('Error saving booking: ' + error.message);
+      alert('Error adding unit: ' + error.message);
     } else {
-      setShowForm(false);
-      fetchData();
+      setShowAddModal(false);
+      setNewUnitNo('');
+      setSelectedProject(newProject.trim());
+      fetchUnits();
     }
   };
 
   const formatINR = (val: number) =>
-    new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(val || 0);
+    new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      maximumFractionDigits: 0,
+    }).format(val);
 
   return (
-    <div className="min-h-screen bg-slate-50 p-6 text-slate-900">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-xl border border-slate-200 shadow-sm mb-6">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-blue-800 text-white rounded-lg shadow">
-            <Home className="w-6 h-6" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold text-slate-900">Real Estate Sales & Customer Receipts</h1>
-            <p className="text-xs text-slate-500">UNIVERSAL ENGICON PVT. LTD. • Unit Bookings & Payment Milestones</p>
-          </div>
+    <div className="p-6 max-w-7xl mx-auto space-y-6">
+      {/* Header & Project Selector */}
+      <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+        <div>
+          <span className="text-xs font-bold uppercase tracking-wider text-blue-700">
+            Real Estate Sales &amp; Inventory Matrix
+          </span>
+          <h1 className="text-2xl font-black text-slate-900 mt-0.5">
+            Project &amp; Floor-Wise Unit Availability
+          </h1>
+          <p className="text-xs text-slate-500 mt-1">
+            Live tracking of Flats, Shops &amp; Offices — Booked vs. Vacant status per floor
+          </p>
         </div>
-        <button
-          onClick={() => setShowForm(!showForm)}
-          className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-800 text-white text-sm font-bold rounded-lg shadow hover:bg-slate-900 transition-all"
-        >
-          <Plus className="w-4 h-4" />
-          Record Customer Receipt
-        </button>
+
+        <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
+          <select
+            value={selectedProject}
+            onChange={(e) => setSelectedProject(e.target.value)}
+            className="px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm font-extrabold text-slate-900 focus:border-blue-600 focus:outline-none"
+          >
+            {projectsList.map((proj) => (
+              <option key={proj} value={proj}>
+                {proj}
+              </option>
+            ))}
+          </select>
+
+          <button
+            onClick={() => {
+              setNewProject(selectedProject);
+              setShowAddModal(true);
+            }}
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-blue-800 hover:bg-blue-900 text-white font-bold text-xs rounded-lg shadow cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            Add Flat / Shop / Office
+          </button>
+        </div>
       </div>
 
-      {showForm && (
-        <form onSubmit={handleSaveBooking} className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm mb-6 space-y-4">
-          <div className="flex justify-between items-center border-b pb-3">
-            <h2 className="font-bold text-slate-800">New Unit Booking / Installment Receipt</h2>
-            <button type="button" onClick={() => setShowForm(false)} className="text-slate-400 hover:text-slate-700">
-              <X className="w-5 h-5" />
-            </button>
+      {/* Top KPI Summary Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+          <div className="text-xs font-bold text-slate-500 uppercase">Total Project Units</div>
+          <div className="text-2xl font-black text-slate-900 mt-1">{stats.total}</div>
+          <div className="mt-2 flex items-center gap-2 text-xs font-bold">
+            <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
+              {stats.available} Khali
+            </span>
+            <span className="text-rose-700 bg-rose-50 px-2 py-0.5 rounded">
+              {stats.booked} Booked
+            </span>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-            <div>
-              <label className="block font-semibold mb-1">Project Name</label>
-              <select
-                required
-                value={form.project_id}
-                onChange={(e) => setForm({ ...form, project_id: e.target.value })}
-                className="w-full border border-slate-300 rounded-lg px-3 py-2"
-              >
-                <option value="">Select Project</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block font-semibold mb-1">Unit / Flat / Shop No</label>
-              <input
-                type="text"
-                required
-                placeholder="e.g., Tower A - Flat 502"
-                value={form.unit_no}
-                onChange={(e) => setForm({ ...form, unit_no: e.target.value })}
-                className="w-full border border-slate-300 rounded-lg px-3 py-2"
-              />
-            </div>
-            <div>
-              <label className="block font-semibold mb-1">Customer Full Name</label>
-              <input
-                type="text"
-                required
-                placeholder="Buyer Name"
-                value={form.customer_name}
-                onChange={(e) => setForm({ ...form, customer_name: e.target.value })}
-                className="w-full border border-slate-300 rounded-lg px-3 py-2"
-              />
-            </div>
-            <div>
-              <label className="block font-semibold mb-1">Customer Mobile</label>
-              <input
-                type="text"
-                placeholder="+91 98350 XXXXX"
-                value={form.customer_phone}
-                onChange={(e) => setForm({ ...form, customer_phone: e.target.value })}
-                className="w-full border border-slate-300 rounded-lg px-3 py-2"
-              />
-            </div>
-            <div>
-              <label className="block font-semibold mb-1">Customer PAN</label>
-              <input
-                type="text"
-                placeholder="ABCDE1234F"
-                value={form.customer_pan}
-                onChange={(e) => setForm({ ...form, customer_pan: e.target.value })}
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 uppercase"
-              />
-            </div>
-            <div>
-              <label className="block font-semibold mb-1">Installment Amount (Excl. GST ₹)</label>
-              <input
-                type="number"
-                required
-                value={form.booking_amount}
-                onChange={(e) => setForm({ ...form, booking_amount: Number(e.target.value) })}
-                className="w-full border border-slate-300 rounded-lg px-3 py-2"
-              />
-            </div>
-          </div>
+        </div>
 
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between bg-slate-100 p-4 rounded-lg gap-4">
-            <div className="text-sm font-semibold text-slate-700">
-              Installment: <span className="font-bold">{formatINR(baseAmt)}</span> + GST (5%):{' '}
-              <span className="font-bold">{formatINR(gstAmt)}</span> = Total Receipt:{' '}
-              <span className="text-emerald-700 font-black text-base">{formatINR(totalReceived)}</span>
-            </div>
-            <button type="submit" className="px-6 py-2.5 bg-emerald-700 text-white font-bold rounded-lg shadow hover:bg-emerald-800">
-              Generate Receipt & Sync Ledger
-            </button>
+        <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+          <div className="flex items-center justify-between text-xs font-bold text-slate-500 uppercase">
+            <span>Flats (Residential)</span>
+            <Home className="w-4 h-4 text-blue-700" />
           </div>
-        </form>
+          <div className="text-2xl font-black text-slate-900 mt-1">{stats.flatsTotal}</div>
+          <div className="text-xs font-semibold text-slate-600 mt-1">
+            Booked: <strong className="text-rose-700">{stats.flatsBooked}</strong> • Khali:{' '}
+            <strong className="text-emerald-700">{stats.flatsTotal - stats.flatsBooked}</strong>
+          </div>
+        </div>
+
+        <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+          <div className="flex items-center justify-between text-xs font-bold text-slate-500 uppercase">
+            <span>Shops (Commercial)</span>
+            <Store className="w-4 h-4 text-amber-600" />
+          </div>
+          <div className="text-2xl font-black text-slate-900 mt-1">{stats.shopsTotal}</div>
+          <div className="text-xs font-semibold text-slate-600 mt-1">
+            Booked: <strong className="text-rose-700">{stats.shopsBooked}</strong> • Khali:{' '}
+            <strong className="text-emerald-700">{stats.shopsTotal - stats.shopsBooked}</strong>
+          </div>
+        </div>
+
+        <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+          <div className="flex items-center justify-between text-xs font-bold text-slate-500 uppercase">
+            <span>Offices (Corporate)</span>
+            <Briefcase className="w-4 h-4 text-indigo-600" />
+          </div>
+          <div className="text-2xl font-black text-slate-900 mt-1">{stats.officesTotal}</div>
+          <div className="text-xs font-semibold text-slate-600 mt-1">
+            Booked: <strong className="text-rose-700">{stats.officesBooked}</strong> • Khali:{' '}
+            <strong className="text-emerald-700">{stats.officesTotal - stats.officesBooked}</strong>
+          </div>
+        </div>
+
+        <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+          <div className="flex items-center justify-between text-xs font-bold text-slate-500 uppercase">
+            <span>Sales &amp; Collection</span>
+            <IndianRupee className="w-4 h-4 text-emerald-700" />
+          </div>
+          <div className="text-lg font-black text-slate-900 mt-1">
+            {formatINR(stats.totalRevenue)}
+          </div>
+          <div className="text-xs font-semibold text-emerald-700 mt-1">
+            Received: {formatINR(stats.totalCollected)}
+          </div>
+        </div>
+      </div>
+
+      {/* Filter Bar */}
+      <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-bold text-slate-500 uppercase mr-1">Unit Type:</span>
+          {['ALL', 'Flat', 'Shop', 'Office'].map((t) => (
+            <button
+              key={t}
+              onClick={() => setTypeFilter(t)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold border cursor-pointer ${
+                typeFilter === t
+                  ? 'bg-blue-800 text-white border-blue-900'
+                  : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+              }`}
+            >
+              {t === 'ALL' ? 'All Types' : t + 's'}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-bold text-slate-500 uppercase mr-1">Status:</span>
+          {['ALL', 'Available', 'Booked'].map((s) => (
+            <button
+              key={s}
+              onClick={() => setStatusFilter(s)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold border cursor-pointer ${
+                statusFilter === s
+                  ? 'bg-slate-900 text-white border-slate-900'
+                  : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+              }`}
+            >
+              {s === 'ALL' ? 'All Units' : s === 'Available' ? 'Khali (Available)' : 'Booked'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Floor-by-Floor Unit Matrix */}
+      {loading ? (
+        <div className="bg-white border border-slate-200 rounded-xl p-10 text-center text-sm text-slate-500">
+          Loading project inventory...
+        </div>
+      ) : Object.keys(floorGroups).length === 0 ? (
+        <div className="bg-white border border-slate-200 rounded-xl p-10 text-center text-sm text-slate-500">
+          Is filter mein koi unit nahi mili. Upar &quot;Add Flat / Shop / Office&quot; se units jodein.
+        </div>
+      ) : (
+        <div className="space-y-5">
+          {Object.entries(floorGroups).map(([floorName, items]) => {
+            const floorBooked = items.filter((i) => i.status === 'Booked').length;
+            const floorKhali = items.filter((i) => i.status === 'Available').length;
+
+            return (
+              <div
+                key={floorName}
+                className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden"
+              >
+                {/* Floor Header */}
+                <div className="px-5 py-3.5 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Building2 className="w-4 h-4 text-blue-800" />
+                    <h2 className="text-sm font-black text-slate-900 uppercase">{floorName}</h2>
+                    <span className="text-xs font-semibold text-slate-500">
+                      (Total: {items.length})
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-3 text-xs font-bold">
+                    <span className="px-2.5 py-1 rounded-md bg-emerald-100 text-emerald-800">
+                      Khali: {floorKhali}
+                    </span>
+                    <span className="px-2.5 py-1 rounded-md bg-rose-100 text-rose-800">
+                      Booked: {floorBooked}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Floor Units Grid */}
+                <div className="p-5 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {items.map((unit) => {
+                    const isBooked = unit.status === 'Booked';
+                    return (
+                      <div
+                        key={unit.id}
+                        onClick={() => openUnitModal(unit)}
+                        className={`p-4 rounded-xl border-2 transition-all cursor-pointer shadow-sm hover:shadow-md ${
+                          isBooked
+                            ? 'bg-rose-50/70 border-rose-300 hover:border-rose-500'
+                            : 'bg-emerald-50/60 border-emerald-300 hover:border-emerald-600'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-base font-black text-slate-900">
+                            {unit.unit_number}
+                          </span>
+                          <span
+                            className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full ${
+                              isBooked
+                                ? 'bg-rose-600 text-white'
+                                : 'bg-emerald-600 text-white'
+                            }`}
+                          >
+                            {isBooked ? 'BOOKED' : 'KHALI'}
+                          </span>
+                        </div>
+
+                        <div className="mt-1 flex items-center justify-between text-xs font-bold text-slate-600">
+                          <span>{unit.unit_type}</span>
+                          <span>{unit.area_sqft} sq.ft</span>
+                        </div>
+
+                        <div className="mt-1.5 text-sm font-extrabold text-slate-900">
+                          {formatINR(Number(unit.total_price || 0))}
+                        </div>
+
+                        {isBooked ? (
+                          <div className="mt-3 pt-2.5 border-t border-rose-200 space-y-1 text-xs">
+                            <div className="font-bold text-slate-900 flex items-center gap-1.5 truncate">
+                              <User className="w-3.5 h-3.5 text-rose-700 shrink-0" />
+                              {unit.customer_name || 'Customer'}
+                            </div>
+                            {unit.customer_phone && (
+                              <div className="text-slate-600 flex items-center gap-1.5">
+                                <Phone className="w-3 h-3 text-slate-500" />
+                                {unit.customer_phone}
+                              </div>
+                            )}
+                            <div className="text-[11px] font-bold text-emerald-800">
+                              Paid: {formatINR(Number(unit.amount_received || 0))}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="mt-3 pt-2.5 border-t border-emerald-200 text-xs font-bold text-emerald-800 flex items-center justify-between">
+                            <span>Click to Book Unit</span>
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       )}
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-sm">
-            <thead>
-              <tr className="bg-slate-100 border-b border-slate-200 text-xs font-bold text-slate-600 uppercase">
-                <th className="py-3 px-4">Unit No</th>
-                <th className="py-3 px-4">Project</th>
-                <th className="py-3 px-4">Customer Name</th>
-                <th className="py-3 px-4">Payment Mode</th>
-                <th className="py-3 px-4 text-right">Amount Received</th>
-                <th className="py-3 px-4 text-center">Official Receipt</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {bookings.map((bk) => (
-                <tr key={bk.id} className="hover:bg-slate-50">
-                  <td className="py-3 px-4 font-mono font-bold text-blue-800">{bk.unit_no}</td>
-                  <td className="py-3 px-4 font-medium">{bk.projects?.name || 'Real Estate Project'}</td>
-                  <td className="py-3 px-4 font-semibold">{bk.customer_name}</td>
-                  <td className="py-3 px-4 text-slate-600">{bk.payment_mode || 'Bank Transfer'}</td>
-                  <td className="py-3 px-4 text-right font-bold text-emerald-700">
-                    {formatINR(bk.booking_amount)}
-                  </td>
-                  <td className="py-3 px-4 text-center">
-                    <button
-                      onClick={() => setPrintReceipt(bk)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-800 text-white text-xs font-bold rounded-lg shadow-sm hover:bg-slate-900 transition-all"
-                    >
-                      <Printer className="w-3.5 h-3.5" />
-                      Print Receipt
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {!loading && bookings.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="py-8 text-center text-slate-400">No customer receipts found.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {printReceipt && (
-        <div className="fixed inset-0 z-50 bg-black/70 overflow-y-auto p-4 md:p-8">
-          <div className="max-w-4xl mx-auto bg-white rounded-xl p-5 shadow-2xl">
-            <div className="no-print flex justify-between items-center border-b pb-3 mb-4">
-              <span className="font-bold text-slate-700 text-sm">Official Customer Payment Receipt (A4)</span>
+      {/* Unit Booking / Edit Modal */}
+      {activeUnit && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <span className="text-xs font-bold text-blue-700 uppercase">
+                  {activeUnit.project_name} • {activeUnit.floor_no}
+                </span>
+                <h3 className="text-lg font-black text-slate-900">
+                  Unit {activeUnit.unit_number} ({activeUnit.unit_type})
+                </h3>
+              </div>
               <button
-                onClick={() => setPrintReceipt(null)}
-                className="px-3 py-1.5 bg-rose-600 text-white text-xs font-bold rounded-lg hover:bg-rose-700"
+                onClick={() => setActiveUnit(null)}
+                className="p-1.5 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 cursor-pointer"
               >
-                Close Preview ✕
+                <X className="w-4 h-4" />
               </button>
             </div>
-            <OfficialPrintDocument
-              docType="CUSTOMER PAYMENT RECEIPT"
-              docNumber={`REC-${printReceipt.unit_no || printReceipt.id}`}
-              docDate={(printReceipt.booking_date || printReceipt.created_at || new Date().toISOString()).slice(0, 10)}
-              projectName={printReceipt.projects?.name || 'Universal Engicon Real Estate'}
-              partyTitle="Allottee / Customer Details"
-              partyName={printReceipt.customer_name}
-              partyPhone={printReceipt.customer_phone}
-              partyGstOrPan={printReceipt.customer_pan}
-              items={[
-                {
-                  description: `Booking / Installment Received for Unit ${printReceipt.unit_no} (${printReceipt.unit_type || 'Property Unit'}) via ${printReceipt.payment_mode || 'Bank Transfer'}`,
-                  unit: 'Unit',
-                  quantity: 1,
-                  rate: Number(printReceipt.booking_amount || 0) - Number(printReceipt.gst_amount || 0),
-                  amount: Number(printReceipt.booking_amount || 0) - Number(printReceipt.gst_amount || 0),
-                },
-              ]}
-              subTotal={Number(printReceipt.booking_amount || 0) - Number(printReceipt.gst_amount || 0)}
-              gstAmount={Number(printReceipt.gst_amount || 0)}
-              grandTotal={Number(printReceipt.booking_amount || 0)}
-            />
+
+            <form onSubmit={handleSaveBooking} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Customer Full Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Mohammad Irfan"
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm font-semibold text-slate-900"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Customer Mobile Number *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. 9835012345"
+                  value={customerPhone}
+                  onChange={(e) => setCustomerPhone(e.target.value)}
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm font-semibold text-slate-900"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Booking Amount Received (₹)
+                  </label>
+                  <input
+                    type="number"
+                    placeholder="e.g. 500000"
+                    value={amountReceived}
+                    onChange={(e) => setAmountReceived(e.target.value)}
+                    className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm font-semibold text-slate-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Booking Date
+                  </label>
+                  <input
+                    type="date"
+                    value={bookingDate}
+                    onChange={(e) => setBookingDate(e.target.value)}
+                    className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm font-semibold text-slate-900"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2 flex items-center justify-between gap-2">
+                {activeUnit.status === 'Booked' && (
+                  <button
+                    type="button"
+                    onClick={handleCancelBooking}
+                    className="px-3.5 py-2.5 bg-rose-50 text-rose-700 border border-rose-200 font-bold text-xs rounded-lg hover:bg-rose-100 cursor-pointer"
+                  >
+                    Cancel Booking
+                  </button>
+                )}
+                <button
+                  type="submit"
+                  disabled={savingBooking}
+                  className="ml-auto px-5 py-2.5 bg-blue-800 hover:bg-blue-900 text-white font-bold text-xs rounded-lg shadow cursor-pointer"
+                >
+                  {savingBooking ? 'Saving...' : 'Confirm & Save Booking'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add New Flat / Shop / Office Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="text-lg font-black text-slate-900">
+                Add New Flat / Shop / Office
+              </h3>
+              <button
+                onClick={() => setShowAddModal(false)}
+                className="p-1.5 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddUnit} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Project Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={newProject}
+                  onChange={(e) => setNewProject(e.target.value)}
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm font-semibold text-slate-900"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Floor *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. 4th Floor"
+                    value={newFloor}
+                    onChange={(e) => setNewFloor(e.target.value)}
+                    className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm font-semibold text-slate-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Unit Number *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. 401 or G-04"
+                    value={newUnitNo}
+                    onChange={(e) => setNewUnitNo(e.target.value)}
+                    className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm font-semibold text-slate-900"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Type *</label>
+                  <select
+                    value={newUnitType}
+                    onChange={(e) => setNewUnitType(e.target.value as any)}
+                    className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm font-semibold text-slate-900"
+                  >
+                    <option value="Flat">Flat</option>
+                    <option value="Shop">Shop</option>
+                    <option value="Office">Office</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Area (Sq.Ft)</label>
+                  <input
+                    type="number"
+                    value={newArea}
+                    onChange={(e) => setNewArea(e.target.value)}
+                    className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm font-semibold text-slate-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Price (₹)</label>
+                  <input
+                    type="number"
+                    value={newPrice}
+                    onChange={(e) => setNewPrice(e.target.value)}
+                    className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm font-semibold text-slate-900"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2 flex justify-end">
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 bg-blue-800 hover:bg-blue-900 text-white font-bold text-xs rounded-lg shadow cursor-pointer"
+                >
+                  + Save Unit to Project
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
