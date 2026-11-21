@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, Suspense } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { createClient } from '@supabase/supabase-js';
 import {
   LayoutDashboard,
@@ -21,6 +21,10 @@ import {
   ShieldCheck,
   Menu,
   X,
+  ChevronDown,
+  ChevronRight,
+  Layers,
+  PlusCircle,
 } from 'lucide-react';
 
 const supabase = createClient(
@@ -28,47 +32,26 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-// 1. Role-Based Route Access Rules
 const ROLE_PERMISSIONS: Record<string, string[]> = {
-  admin: ['*'], // Full ERP Access
-  md: ['*'],    // Full ERP Access
-  accountant: [
-    '/dashboard',
-    '/finance',
-    '/po',
-    '/purchase-orders',
-    '/ra',
-    '/real-estate',
-    '/sales',
-  ],
-  site_engineer: [
-    '/dashboard',
-    '/projects',
-    '/boq',
-    '/mr',
-    '/dpr',
-    '/inventory',
-    '/store',
-    '/machinery',
-  ],
-  store_manager: [
-    '/dashboard',
-    '/inventory',
-    '/store',
-    '/mr',
-    '/po',
-    '/purchase-orders',
-  ],
+  admin: ['*'],
+  md: ['*'],
+  'managing director': ['*'],
+  accountant: ['/dashboard', '/finance', '/po', '/purchase-orders', '/ra', '/real-estate', '/sales'],
+  'accounts manager': ['/dashboard', '/finance', '/po', '/purchase-orders', '/ra', '/real-estate', '/sales'],
+  site_engineer: ['/dashboard', '/projects', '/boq', '/mr', '/dpr', '/inventory', '/store', '/machinery'],
+  'site engineer': ['/dashboard', '/projects', '/boq', '/mr', '/dpr', '/inventory', '/store', '/machinery'],
+  store_manager: ['/dashboard', '/inventory', '/store', '/mr', '/po', '/purchase-orders'],
+  'store keeper': ['/dashboard', '/inventory', '/store', '/mr', '/po', '/purchase-orders'],
+  'sales manager': ['/dashboard', '/sales', '/real-estate'],
 };
 
 export function canAccessRoute(userRole: string | undefined, routePath: string): boolean {
-  const role = (userRole || 'site_engineer').toLowerCase();
-  const allowedRoutes = ROLE_PERMISSIONS[role] || ROLE_PERMISSIONS.site_engineer;
+  const role = (userRole || 'admin').toLowerCase();
+  const allowedRoutes = ROLE_PERMISSIONS[role] || ['*'];
   if (allowedRoutes.includes('*')) return true;
   return allowedRoutes.some((allowed) => routePath === allowed || routePath.startsWith(allowed + '/'));
 }
 
-// 2. All Universal Engicon ERP Modules (With MD Approval Center at Top)
 const MENU_ITEMS = [
   { label: 'MD Approval Center', href: '/approvals', icon: ShieldCheck },
   { label: 'Executive Dashboard', href: '/dashboard', icon: LayoutDashboard },
@@ -80,19 +63,38 @@ const MENU_ITEMS = [
   { label: 'Daily Progress (DPR)', href: '/dpr', icon: FileCheck2 },
   { label: 'Contractor RA Bills', href: '/ra', icon: Receipt },
   { label: 'Finance & Master Ledger', href: '/finance', icon: IndianRupee },
-  { label: 'Real Estate Sales', href: '/sales', icon: Home },
+  {
+    label: 'Real Estate Sales',
+    href: '/sales',
+    icon: Home,
+    subItems: [
+      { label: 'Project Available & Booked', href: '/sales?view=inventory', viewKey: 'inventory', icon: Layers },
+      { label: 'Record New Project', href: '/sales?view=new', viewKey: 'new', icon: PlusCircle },
+      { label: 'Customer Payment Receipt', href: '/sales?view=receipts', viewKey: 'receipts', icon: Receipt },
+    ],
+  },
   { label: 'Plant & Machinery', href: '/machinery', icon: Truck },
   { label: 'HR & Muster Roll', href: '/users', icon: Users },
 ];
 
-export default function Sidebar() {
+function SidebarContent() {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const currentView = searchParams.get('view') || 'inventory';
+
   const [userRole, setUserRole] = useState<string>('admin');
   const [userEmail, setUserEmail] = useState<string>('');
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [realEstateOpen, setRealEstateOpen] = useState(true);
 
   useEffect(() => {
     if (pathname === '/login' || pathname === '/') return;
+
+    // Read role from cookie first
+    const cookieMatch = document.cookie.match(/(?:^|;\s*)ue_role=([^;]*)/);
+    const sessionMatch = document.cookie.match(/(?:^|;\s*)ue_session=([^;]*)/);
+    if (cookieMatch) setUserRole(decodeURIComponent(cookieMatch[1]).toLowerCase());
+    if (sessionMatch) setUserEmail(decodeURIComponent(sessionMatch[1]));
 
     const fetchUserRole = async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -103,7 +105,6 @@ export default function Sidebar() {
           .select('role')
           .eq('id', user.id)
           .single();
-
         if (profile?.role) {
           setUserRole(profile.role.toLowerCase());
         }
@@ -119,6 +120,7 @@ export default function Sidebar() {
   const handleLogout = async () => {
     document.cookie = 'ue_session=; path=/; max-age=0';
     document.cookie = 'ue_role=; path=/; max-age=0';
+    document.cookie = 'ue_dept=; path=/; max-age=0';
     document.cookie = 'sb-access-token=; path=/; max-age=0';
     await supabase.auth.signOut();
     window.location.href = '/login';
@@ -162,7 +164,6 @@ export default function Sidebar() {
             </div>
           </div>
 
-          {/* Active Role Badge */}
           <div className="mt-3 px-2.5 py-1.5 rounded-md bg-slate-100 border border-slate-200 flex items-center justify-between">
             <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase text-blue-800">
               <ShieldCheck className="w-3.5 h-3.5" />
@@ -174,11 +175,61 @@ export default function Sidebar() {
           </div>
         </div>
 
-        {/* Embossed Button-Style Navigation Menu */}
+        {/* Navigation Menu with Real Estate Sub-Menu */}
         <nav className="flex-1 overflow-y-auto p-3 space-y-1.5">
           {visibleMenuItems.map((item) => {
             const Icon = item.icon;
             const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
+
+            if (item.subItems) {
+              return (
+                <div key={item.href} className="space-y-1">
+                  <button
+                    type="button"
+                    onClick={() => setRealEstateOpen(!realEstateOpen)}
+                    className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-lg text-sm font-semibold transition-all border cursor-pointer ${
+                      isActive
+                        ? 'bg-blue-800 text-white border-blue-900 shadow-md'
+                        : 'bg-white text-slate-700 border-slate-200/90 shadow-sm hover:bg-blue-50 hover:text-blue-800'
+                    }`}
+                  >
+                    <span className="flex items-center gap-3">
+                      <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-slate-500'}`} />
+                      <span className="truncate">{item.label}</span>
+                    </span>
+                    {realEstateOpen ? (
+                      <ChevronDown className="w-4 h-4 shrink-0" />
+                    ) : (
+                      <ChevronRight className="w-4 h-4 shrink-0" />
+                    )}
+                  </button>
+
+                  {realEstateOpen && (
+                    <div className="pl-4 pr-1 py-1 space-y-1 border-l-2 border-blue-200 ml-3">
+                      {item.subItems.map((sub) => {
+                        const SubIcon = sub.icon;
+                        const isSubActive = pathname === '/sales' && currentView === sub.viewKey;
+                        return (
+                          <Link
+                            key={sub.href}
+                            href={sub.href}
+                            onClick={() => setMobileOpen(false)}
+                            className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-bold transition-all ${
+                              isSubActive
+                                ? 'bg-blue-100 text-blue-900 border border-blue-300 shadow-2xs'
+                                : 'text-slate-600 hover:bg-white hover:text-blue-800'
+                            }`}
+                          >
+                            <SubIcon className={`w-3.5 h-3.5 shrink-0 ${isSubActive ? 'text-blue-800' : 'text-slate-400'}`} />
+                            <span className="truncate">{sub.label}</span>
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            }
 
             return (
               <Link
@@ -210,5 +261,13 @@ export default function Sidebar() {
         </div>
       </aside>
     </>
+  );
+}
+
+export default function Sidebar() {
+  return (
+    <Suspense fallback={null}>
+      <SidebarContent />
+    </Suspense>
   );
 }
