@@ -1,35 +1,89 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { supabase } from '../../lib/supabase';
-import OfficialPrintDocument from '../../components/OfficialPrintDocument';import { Plus, Printer, ShoppingCart, X } from 'lucide-react';
-export default function PurchaseOrdersPage() {
-  const [orders, setOrders] = useState<any[]>([]);
-  const [projects, setProjects] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [printPO, setPrintPO] = useState<any | null>(null);
+import { createClient } from '@supabase/supabase-js';
+import { FileText, CheckCircle2, PlusCircle, Printer } from 'lucide-react';
 
-  const [form, setForm] = useState({
-    po_number: `PO-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`,
-    project_id: '',
-    vendor_name: '',
-    vendor_gstin: '',
-    material_name: '',
-    unit: 'Bags',
-    quantity: 100,
-    rate: 380,
-    gst_percent: 18,
-  });
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
+
+interface MaterialRequest {
+  id: string;
+  mr_number: string;
+  project_name: string;
+  material_name: string;
+  quantity: number;
+  unit?: string;
+  status?: string;
+  requested_by?: string;
+  created_at?: string;
+}
+
+interface PurchaseOrder {
+  id: string;
+  po_number: string;
+  mr_number?: string | null;
+  project_name: string;
+  vendor_name: string;
+  material_name: string;
+  quantity: number;
+  rate: number;
+  gst_percent: number;
+  total_amount: number;
+  status: string;
+  created_at?: string;
+}
+
+export default function PurchaseOrdersPage() {
+  const [materialRequests, setMaterialRequests] = useState<MaterialRequest[]>([]);
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const [selectedMrId, setSelectedMrId] = useState<string>('');
+  const [poNumber, setPoNumber] = useState<string>(
+    `PO-UE-${Math.floor(100000 + Math.random() * 900000)}`
+  );
+  const [selectedProject, setSelectedProject] = useState<string>('');
+  const [vendorName, setVendorName] = useState<string>('');
+  const [selectedMaterial, setSelectedMaterial] = useState<string>('');
+  const [poQuantity, setPoQuantity] = useState<string>('');
+  const [poRate, setPoRate] = useState<string>('');
+  const [gstPercent, setGstPercent] = useState<string>('18');
 
   const fetchData = async () => {
     setLoading(true);
-    const [{ data: poData }, { data: projData }] = await Promise.all([
-      supabase.from('purchase_orders').select('*, projects(name)').order('created_at', { ascending: false }),
-      supabase.from('projects').select('id, name'),
+    const [mrRes, poRes] = await Promise.all([
+      supabase
+        .from('material_requests')
+        .select('*')
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('purchase_orders')
+        .select('*')
+        .order('created_at', { ascending: false }),
     ]);
-    if (poData) setOrders(poData);
-    if (projData) setProjects(projData);
+
+    if (!mrRes.error && mrRes.data) {
+      const normalizedMRs: MaterialRequest[] = mrRes.data.map((row: any) => ({
+        id: String(row.id),
+        mr_number: row.mr_number || row.mr_no || `MR-${row.id}`,
+        project_name: row.project_name || row.project_site || row.site_name || '',
+        material_name: row.material_name || row.item_name || row.material || '',
+        quantity: Number(row.quantity ?? row.qty_needed ?? 0),
+        unit: row.unit || 'Nos',
+        status: row.status || 'Pending',
+        requested_by: row.requested_by || '',
+        created_at: row.created_at,
+      }));
+      setMaterialRequests(normalizedMRs);
+    }
+
+    if (!poRes.error && poRes.data) {
+      setPurchaseOrders(poRes.data);
+    }
     setLoading(false);
   };
 
@@ -37,261 +91,305 @@ export default function PurchaseOrdersPage() {
     fetchData();
   }, []);
 
-  const baseAmount = Number(form.quantity) * Number(form.rate);
-  const gstAmount = (baseAmount * Number(form.gst_percent)) / 100;
-  const totalAmount = baseAmount + gstAmount;
+  const handleSelectMR = (mrId: string) => {
+    setSelectedMrId(mrId);
+    const mr = materialRequests.find((item) => item.id === mrId);
+    if (!mr) {
+      setSelectedProject('');
+      return;
+    }
+
+    setSelectedProject(mr.project_name);
+    if (mr.material_name) setSelectedMaterial(mr.material_name);
+    if (mr.quantity > 0) setPoQuantity(String(mr.quantity));
+  };
+
+  const qtyNum = Number(poQuantity || 0);
+  const rateNum = Number(poRate || 0);
+  const gstNum = Number(gstPercent || 0);
+  const baseAmount = qtyNum * rateNum;
+  const gstAmount = (baseAmount * gstNum) / 100;
+  const totalAmount = Math.round(baseAmount + gstAmount);
 
   const handleCreatePO = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!selectedProject.trim() || !vendorName.trim() || !selectedMaterial.trim() || qtyNum <= 0) {
+      alert('Please select an MR (or fill Project, Vendor, Material, and Quantity).');
+      return;
+    }
+
+    setSaving(true);
+    const chosenMR = materialRequests.find((m) => m.id === selectedMrId);
+
     const { error } = await supabase.from('purchase_orders').insert([
       {
-        po_number: form.po_number,
-        project_id: form.project_id ? Number(form.project_id) : null,
-        vendor_name: form.vendor_name,
-        vendor_gstin: form.vendor_gstin,
-        material_name: form.material_name,
-        unit: form.unit,
-        quantity: Number(form.quantity),
-        rate: Number(form.rate),
-        gst_percent: Number(form.gst_percent),
-        base_amount: baseAmount,
-        gst_amount: gstAmount,
+        po_number: poNumber.trim(),
+        mr_number: chosenMR ? chosenMR.mr_number : null,
+        project_name: selectedProject.trim(),
+        vendor_name: vendorName.trim(),
+        material_name: selectedMaterial.trim(),
+        quantity: qtyNum,
+        rate: rateNum,
+        gst_percent: gstNum,
         total_amount: totalAmount,
-        status: 'Approved',
+        status: 'Issued',
       },
     ]);
 
+    setSaving(false);
+
     if (error) {
-      alert('Error saving PO: ' + error.message);
-    } else {
-      setShowForm(false);
-      fetchData();
+      alert('PO Error: ' + error.message);
+      return;
     }
+
+    if (chosenMR) {
+      await supabase
+        .from('material_requests')
+        .update({ status: 'PO Issued' })
+        .eq('id', chosenMR.id);
+    }
+
+    setPoNumber(`PO-UE-${Math.floor(100000 + Math.random() * 900000)}`);
+    setSelectedMrId('');
+    setSelectedProject('');
+    setVendorName('');
+    setSelectedMaterial('');
+    setPoQuantity('');
+    setPoRate('');
+    await fetchData();
   };
 
   const formatINR = (val: number) =>
-    new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(val || 0);
+    new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      maximumFractionDigits: 0,
+    }).format(val);
 
   return (
-    <div className="min-h-screen bg-slate-50 p-6 text-slate-900">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-xl border border-slate-200 shadow-sm mb-6">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-blue-800 text-white rounded-lg shadow">
-            <ShoppingCart className="w-6 h-6" />
-          </div>
+    <div className="min-h-screen bg-slate-50/70 p-6 lg:p-8">
+      <div className="max-w-7xl mx-auto space-y-6">
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
-            <h1 className="text-xl font-bold text-slate-900">Purchase Orders (PO)</h1>
-            <p className="text-xs text-slate-500">UNIVERSAL ENGICON PVT. LTD. • Procurement & GST Billing</p>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-blue-700">
+              Universal Engicon Pvt. Ltd. • Procurement
+            </span>
+            <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight mt-0.5">
+              Purchase Orders (PO)
+            </h1>
           </div>
+          <button
+            onClick={() => window.print()}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-50 cursor-pointer"
+          >
+            <Printer className="w-4 h-4" />
+            Print Register
+          </button>
         </div>
-        <button
-          onClick={() => setShowForm(!showForm)}
-          className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-800 text-white text-sm font-bold rounded-lg shadow hover:bg-slate-900 transition-all"
-        >
-          <Plus className="w-4 h-4" />
-          Create New PO
-        </button>
-      </div>
 
-      {/* Create PO Form */}
-      {showForm && (
-        <form onSubmit={handleCreatePO} className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm mb-6 space-y-4">
-          <div className="flex justify-between items-center border-b pb-3">
-            <h2 className="font-bold text-slate-800">Issue New Purchase Order</h2>
-            <button type="button" onClick={() => setShowForm(false)} className="text-slate-400 hover:text-slate-700">
-              <X className="w-5 h-5" />
-            </button>
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-5">
+          <div className="flex items-center gap-2.5 border-b border-slate-100 pb-3">
+            <PlusCircle className="w-5 h-5 text-blue-700" />
+            <h2 className="text-base font-extrabold text-slate-900">
+              Issue Purchase Order from Material Request
+            </h2>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-            <div>
-              <label className="block font-semibold mb-1">PO Number</label>
-              <input
-                type="text"
-                required
-                value={form.po_number}
-                onChange={(e) => setForm({ ...form, po_number: e.target.value })}
-                className="w-full border border-slate-300 rounded-lg px-3 py-2"
-              />
-            </div>
-            <div>
-              <label className="block font-semibold mb-1">Project / Site</label>
+
+          <form onSubmit={handleCreatePO} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="lg:col-span-2">
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Select Material Request (All Indented MRs) *
+              </label>
               <select
-                required
-                value={form.project_id}
-                onChange={(e) => setForm({ ...form, project_id: e.target.value })}
-                className="w-full border border-slate-300 rounded-lg px-3 py-2"
+                value={selectedMrId}
+                onChange={(e) => handleSelectMR(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:border-blue-700 focus:outline-none"
               >
-                <option value="">Select Project</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
+                <option value="">
+                  {loading ? 'Loading Material Requests...' : '-- Select MR (Shows Site, Material & Qty) --'}
+                </option>
+                {materialRequests.map((mr) => (
+                  <option key={mr.id} value={mr.id}>
+                    {mr.mr_number} — {mr.project_name} | {mr.material_name} ({mr.quantity} {mr.unit || ''}) [{mr.status || 'Pending'}]
+                  </option>
                 ))}
               </select>
             </div>
+
             <div>
-              <label className="block font-semibold mb-1">Vendor / Supplier Name</label>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Project / Site Name (Auto-Selected) *
+              </label>
               <input
                 type="text"
                 required
-                placeholder="e.g., UltraTech Cement Distributors"
-                value={form.vendor_name}
-                onChange={(e) => setForm({ ...form, vendor_name: e.target.value })}
-                className="w-full border border-slate-300 rounded-lg px-3 py-2"
+                readOnly={Boolean(selectedMrId)}
+                value={selectedProject}
+                onChange={(e) => setSelectedProject(e.target.value)}
+                placeholder="Select MR to auto-fill site"
+                className={`w-full px-3.5 py-2.5 border rounded-xl text-xs font-extrabold ${
+                  selectedMrId
+                    ? 'bg-blue-50/70 border-blue-300 text-blue-950'
+                    : 'bg-slate-50 border-slate-300 text-slate-900'
+                }`}
               />
             </div>
+
             <div>
-              <label className="block font-semibold mb-1">Vendor GSTIN</label>
-              <input
-                type="text"
-                placeholder="10AAACT1234F1Z2"
-                value={form.vendor_gstin}
-                onChange={(e) => setForm({ ...form, vendor_gstin: e.target.value })}
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 uppercase"
-              />
-            </div>
-            <div>
-              <label className="block font-semibold mb-1">Material / Item Description</label>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                PO Number *
+              </label>
               <input
                 type="text"
                 required
-                placeholder="e.g., OPC 53 Grade Cement"
-                value={form.material_name}
-                onChange={(e) => setForm({ ...form, material_name: e.target.value })}
-                className="w-full border border-slate-300 rounded-lg px-3 py-2"
+                value={poNumber}
+                onChange={(e) => setPoNumber(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono font-bold text-slate-900"
               />
             </div>
-            <div className="grid grid-cols-3 gap-2">
-              <div>
-                <label className="block font-semibold mb-1">Qty</label>
-                <input
-                  type="number"
-                  required
-                  value={form.quantity}
-                  onChange={(e) => setForm({ ...form, quantity: Number(e.target.value) })}
-                  className="w-full border border-slate-300 rounded-lg px-2 py-2"
-                />
-              </div>
-              <div>
-                <label className="block font-semibold mb-1">Unit</label>
-                <input
-                  type="text"
-                  value={form.unit}
-                  onChange={(e) => setForm({ ...form, unit: e.target.value })}
-                  className="w-full border border-slate-300 rounded-lg px-2 py-2"
-                />
-              </div>
-              <div>
-                <label className="block font-semibold mb-1">Rate (₹)</label>
-                <input
-                  type="number"
-                  required
-                  value={form.rate}
-                  onChange={(e) => setForm({ ...form, rate: Number(e.target.value) })}
-                  className="w-full border border-slate-300 rounded-lg px-2 py-2"
-                />
-              </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Vendor Name *
+              </label>
+              <input
+                type="text"
+                required
+                value={vendorName}
+                onChange={(e) => setVendorName(e.target.value)}
+                placeholder="Supplier / Vendor Name"
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900"
+              />
             </div>
-          </div>
 
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between bg-slate-100 p-4 rounded-lg gap-4">
-            <div className="text-sm font-semibold text-slate-700">
-              Base: <span className="font-bold">{formatINR(baseAmount)}</span> + GST ({form.gst_percent}%):{' '}
-              <span className="font-bold">{formatINR(gstAmount)}</span> = Grand Total:{' '}
-              <span className="text-blue-800 font-black text-base">{formatINR(totalAmount)}</span>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Material *
+              </label>
+              <input
+                type="text"
+                required
+                value={selectedMaterial}
+                onChange={(e) => setSelectedMaterial(e.target.value)}
+                placeholder="Material Name"
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900"
+              />
             </div>
-            <button type="submit" className="px-6 py-2.5 bg-emerald-700 text-white font-bold rounded-lg shadow hover:bg-emerald-800">
-              Save & Approve PO
-            </button>
-          </div>
-        </form>
-      )}
 
-      {/* PO Table */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-sm">
-            <thead>
-              <tr className="bg-slate-100 border-b border-slate-200 text-xs font-bold text-slate-600 uppercase">
-                <th className="py-3 px-4">PO Number</th>
-                <th className="py-3 px-4">Project</th>
-                <th className="py-3 px-4">Vendor</th>
-                <th className="py-3 px-4">Material</th>
-                <th className="py-3 px-4 text-right">Qty / Rate</th>
-                <th className="py-3 px-4 text-right">Grand Total</th>
-                <th className="py-3 px-4 text-center">Official PDF</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {orders.map((po) => (
-                <tr key={po.id} className="hover:bg-slate-50">
-                  <td className="py-3 px-4 font-mono font-bold text-blue-800">{po.po_number || `PO-${po.id}`}</td>
-                  <td className="py-3 px-4 font-medium">{po.projects?.name || 'General Site'}</td>
-                  <td className="py-3 px-4 font-semibold">{po.vendor_name}</td>
-                  <td className="py-3 px-4">{po.material_name}</td>
-                  <td className="py-3 px-4 text-right text-slate-600">
-                    {po.quantity} {po.unit} @ ₹{po.rate}
-                  </td>
-                  <td className="py-3 px-4 text-right font-bold text-slate-900">
-                    {formatINR(po.total_amount || po.amount)}
-                  </td>
-                  <td className="py-3 px-4 text-center">
-                    <button
-                      onClick={() => setPrintPO(po)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-800 text-white text-xs font-bold rounded-lg shadow-sm hover:bg-slate-900 transition-all"
-                    >
-                      <Printer className="w-3.5 h-3.5" />
-                      Print PDF
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {!loading && orders.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="py-8 text-center text-slate-400">No Purchase Orders found.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Quantity *
+              </label>
+              <input
+                type="number"
+                required
+                min="1"
+                value={poQuantity}
+                onChange={(e) => setPoQuantity(e.target.value)}
+                placeholder="100"
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900"
+              />
+            </div>
 
-      {/* A4 Official Print Modal */}
-      {printPO && (
-        <div className="fixed inset-0 z-50 bg-black/70 overflow-y-auto p-4 md:p-8">
-          <div className="max-w-4xl mx-auto bg-white rounded-xl p-5 shadow-2xl">
-            <div className="no-print flex justify-between items-center border-b pb-3 mb-4">
-              <span className="font-bold text-slate-700 text-sm">Official A4 Letterhead Preview</span>
-              <button
-                onClick={() => setPrintPO(null)}
-                className="px-3 py-1.5 bg-rose-600 text-white text-xs font-bold rounded-lg hover:bg-rose-700"
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Rate (₹) *
+              </label>
+              <input
+                type="number"
+                required
+                min="0"
+                value={poRate}
+                onChange={(e) => setPoRate(e.target.value)}
+                placeholder="420"
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                GST (%)
+              </label>
+              <select
+                value={gstPercent}
+                onChange={(e) => setGstPercent(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900"
               >
-                Close Preview ✕
+                <option value="0">0% GST</option>
+                <option value="5">5% GST</option>
+                <option value="12">12% GST</option>
+                <option value="18">18% GST</option>
+                <option value="28">28% GST</option>
+              </select>
+            </div>
+
+            <div className="lg:col-span-3 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
+              <div className="text-xs text-slate-700">
+                <span className="font-bold">Total PO Value (incl. GST): </span>
+                <span className="text-base font-extrabold text-emerald-700 ml-1">
+                  {formatINR(totalAmount)}
+                </span>
+              </div>
+
+              <button
+                type="submit"
+                disabled={saving}
+                className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-800 hover:bg-blue-900 text-white font-bold text-xs rounded-xl shadow cursor-pointer"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                {saving ? 'Issuing PO...' : 'Issue Purchase Order'}
               </button>
             </div>
-            <OfficialPrintDocument
-              docType="PURCHASE ORDER"
-              docNumber={printPO.po_number || `PO-${printPO.id}`}
-              docDate={(printPO.created_at || new Date().toISOString()).slice(0, 10)}
-              projectName={printPO.projects?.name || 'Universal Engicon Site'}
-              partyTitle="Supplier / Vendor Details"
-              partyName={printPO.vendor_name || 'Approved Vendor'}
-              partyGstOrPan={printPO.vendor_gstin}
-              items={[
-                {
-                  description: printPO.material_name || 'Construction Material Supply',
-                  unit: printPO.unit || 'Nos',
-                  quantity: printPO.quantity || 1,
-                  rate: printPO.rate || 0,
-                  amount: Number(printPO.base_amount || printPO.total_amount || 0),
-                },
-              ]}
-              subTotal={Number(printPO.base_amount || printPO.total_amount || 0)}
-              gstAmount={Number(printPO.gst_amount || 0)}
-              grandTotal={Number(printPO.total_amount || printPO.amount || 0)}
-            />
+          </form>
+        </div>
+
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
+          <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
+            <FileText className="w-4 h-4 text-slate-600" />
+            <h3 className="text-sm font-extrabold text-slate-900">Issued Purchase Orders</h3>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider border-b border-slate-200">
+                  <th className="py-3.5 px-5">PO No</th>
+                  <th className="py-3.5 px-5">MR No</th>
+                  <th className="py-3.5 px-5">Project / Site</th>
+                  <th className="py-3.5 px-5">Vendor</th>
+                  <th className="py-3.5 px-5">Material &amp; Qty</th>
+                  <th className="py-3.5 px-5 text-right">Total Value</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {purchaseOrders.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-10 text-center text-slate-500">
+                      No purchase orders issued yet.
+                    </td>
+                  </tr>
+                ) : (
+                  purchaseOrders.map((po) => (
+                    <tr key={po.id} className="hover:bg-slate-50/80">
+                      <td className="py-3.5 px-5 font-mono font-bold text-blue-700">{po.po_number}</td>
+                      <td className="py-3.5 px-5 font-mono text-slate-600">{po.mr_number || '-'}</td>
+                      <td className="py-3.5 px-5 font-bold text-slate-900">{po.project_name}</td>
+                      <td className="py-3.5 px-5 text-slate-700">{po.vendor_name}</td>
+                      <td className="py-3.5 px-5 text-slate-700">
+                        {po.material_name} ({po.quantity})
+                      </td>
+                      <td className="py-3.5 px-5 text-right font-extrabold text-emerald-700">
+                        {formatINR(Number(po.total_amount || 0))}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
