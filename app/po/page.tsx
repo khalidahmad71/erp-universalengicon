@@ -1,4 +1,5 @@
 'use client';
+
 import React, { useEffect, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { createClient } from '@supabase/supabase-js';
@@ -155,6 +156,7 @@ function PurchaseOrdersContent() {
 
   const [materialRequests, setMaterialRequests] = useState<MaterialRequest[]>([]);
   const [vendors, setVendors] = useState<VendorOption[]>([]);
+  const [vendorDebugMsg, setVendorDebugMsg] = useState<string>('');
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -177,20 +179,12 @@ function PurchaseOrdersContent() {
 
   const fetchData = async () => {
     setLoading(true);
+    setVendorDebugMsg('');
     try {
       const [mrRes, poRes, vndRes] = await Promise.all([
-        supabase
-          .from('material_requests')
-          .select('id, mr_number, project_name, material_desc, quantity, requested_by, status, created_at')
-          .order('created_at', { ascending: false }),
-        supabase
-          .from('purchase_orders')
-          .select('*')
-          .order('created_at', { ascending: false }),
-        supabase
-          .from('vendors')
-          .select('id, vendor_code, vendor_name, gstin, status')
-          .order('vendor_name', { ascending: true }),
+        supabase.from('material_requests').select('*'),
+        supabase.from('purchase_orders').select('*'),
+        supabase.from('vendors').select('*'),
       ]);
 
       if (!mrRes.error && Array.isArray(mrRes.data)) {
@@ -207,17 +201,24 @@ function PurchaseOrdersContent() {
         setMaterialRequests(normalizedMRs);
       }
 
-      if (!vndRes.error && Array.isArray(vndRes.data)) {
-        const activeVendors: VendorOption[] = vndRes.data
-          .filter((v: any) => String(v?.status || 'Active') === 'Active')
+      if (vndRes.error) {
+        setVendorDebugMsg(`DB Error: ${vndRes.error.message}`);
+      } else if (Array.isArray(vndRes.data)) {
+        const list: VendorOption[] = vndRes.data
+          .filter((v: any) => String(v?.status || 'Active').trim().toLowerCase() !== 'inactive')
           .map((v: any, idx: number) => ({
             id: String(v?.id ?? idx),
             vendor_code: String(v?.vendor_code || `VND-${idx + 1}`),
-            vendor_name: String(v?.vendor_name || ''),
+            vendor_name: String(
+              v?.vendor_name || v?.name || v?.firm_name || 'Unnamed Vendor'
+            ),
             gstin: v?.gstin ? String(v.gstin) : '',
             status: String(v?.status || 'Active'),
           }));
-        setVendors(activeVendors);
+        setVendors(list);
+        if (list.length === 0) {
+          setVendorDebugMsg('vendors table mein 0 rows mili');
+        }
       }
 
       if (!poRes.error && Array.isArray(poRes.data)) {
@@ -242,8 +243,8 @@ function PurchaseOrdersContent() {
         }));
         setPurchaseOrders(normalizedPOs);
       }
-    } catch (err) {
-      console.error('Error fetching PO data:', err);
+    } catch (err: any) {
+      setVendorDebugMsg(`Fetch Error: ${err?.message || 'Unknown'}`);
     } finally {
       setLoading(false);
     }
@@ -538,14 +539,20 @@ function PurchaseOrdersContent() {
 
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">
-                Select from Vendor Master
+                Select from Vendor Master ({safeVendors.length})
               </label>
               <select
                 value={selectedVendorId}
                 onChange={(e) => handleSelectVendor(e.target.value)}
                 className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:border-blue-700 focus:outline-none"
               >
-                <option value="">-- Choose Registered Vendor --</option>
+                <option value="">
+                  {loading
+                    ? 'Loading Vendors...'
+                    : safeVendors.length === 0
+                    ? `-- No Vendors (${vendorDebugMsg || 'Add in Vendor Master'}) --`
+                    : `-- Choose Registered Vendor (${safeVendors.length}) --`}
+                </option>
                 {safeVendors.map((v) => (
                   <option key={v.id} value={v.id}>
                     {v.vendor_code} — {v.vendor_name} {v.gstin ? `(${v.gstin})` : ''}
