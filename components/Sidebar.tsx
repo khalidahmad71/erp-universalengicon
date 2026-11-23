@@ -10,6 +10,7 @@ import {
   FileSpreadsheet,
   ClipboardList,
   ShoppingCart,
+  Contact2,
   Package,
   FileCheck2,
   Receipt,
@@ -36,12 +37,12 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
   admin: ['*'],
   md: ['*'],
   'managing director': ['*'],
-  accountant: ['/dashboard', '/finance', '/po', '/purchase-orders', '/ra', '/real-estate', '/sales'],
-  'accounts manager': ['/dashboard', '/finance', '/po', '/purchase-orders', '/ra', '/real-estate', '/sales'],
+  accountant: ['/dashboard', '/finance', '/po', '/purchase-orders', '/vendors', '/ra', '/real-estate', '/sales'],
+  'accounts manager': ['/dashboard', '/finance', '/po', '/purchase-orders', '/vendors', '/ra', '/real-estate', '/sales'],
   site_engineer: ['/dashboard', '/projects', '/boq', '/mr', '/dpr', '/inventory', '/store', '/machinery'],
   'site engineer': ['/dashboard', '/projects', '/boq', '/mr', '/dpr', '/inventory', '/store', '/machinery'],
-  store_manager: ['/dashboard', '/inventory', '/store', '/mr', '/po', '/purchase-orders'],
-  'store keeper': ['/dashboard', '/inventory', '/store', '/mr', '/po', '/purchase-orders'],
+  store_manager: ['/dashboard', '/inventory', '/store', '/mr', '/po', '/purchase-orders', '/vendors'],
+  'store keeper': ['/dashboard', '/inventory', '/store', '/mr', '/po', '/purchase-orders', '/vendors'],
   'sales manager': ['/dashboard', '/sales', '/real-estate'],
 };
 
@@ -59,6 +60,7 @@ const MENU_ITEMS = [
   { label: 'BOQ & Estimation', href: '/boq', icon: FileSpreadsheet },
   { label: 'Material Requests (MR)', href: '/mr', icon: ClipboardList },
   { label: 'Purchase Orders (PO)', href: '/po', icon: ShoppingCart },
+  { label: 'Vendor Master', href: '/vendors', icon: Contact2 },
   { label: 'Store & Inventory (GRN)', href: '/store', icon: Package },
   { label: 'Daily Progress (DPR)', href: '/dpr', icon: FileCheck2 },
   { label: 'Contractor RA Bills', href: '/ra', icon: Receipt },
@@ -90,7 +92,6 @@ function SidebarContent() {
   useEffect(() => {
     if (pathname === '/login' || pathname === '/') return;
 
-    // Read role from cookie first
     const cookieMatch = document.cookie.match(/(?:^|;\s*)ue_role=([^;]*)/);
     const sessionMatch = document.cookie.match(/(?:^|;\s*)ue_session=([^;]*)/);
     if (cookieMatch) setUserRole(decodeURIComponent(cookieMatch[1]).toLowerCase());
@@ -130,7 +131,6 @@ function SidebarContent() {
 
   return (
     <>
-      {/* Mobile Header Toggle */}
       <div className="lg:hidden flex items-center justify-between bg-white border-b border-slate-200 px-4 py-3 sticky top-0 z-40 shadow-sm print:hidden">
         <div>
           <span className="font-extrabold text-slate-900 tracking-tight text-base">UNIVERSAL ENGICON</span>
@@ -144,13 +144,11 @@ function SidebarContent() {
         </button>
       </div>
 
-      {/* Sidebar Container */}
       <aside
         className={`fixed inset-y-0 left-0 z-50 w-68 bg-slate-50 border-r border-slate-200 flex flex-col transition-transform duration-200 ease-in-out lg:static lg:translate-x-0 print:hidden ${
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        {/* Company Brand Header */}
         <div className="p-5 bg-white border-b border-slate-200">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-lg bg-blue-800 text-white flex items-center justify-center font-black text-lg shadow">
@@ -175,7 +173,6 @@ function SidebarContent() {
           </div>
         </div>
 
-        {/* Navigation Menu with Real Estate Sub-Menu */}
         <nav className="flex-1 overflow-y-auto p-3 space-y-1.5">
           {visibleMenuItems.map((item) => {
             const Icon = item.icon;
@@ -249,7 +246,6 @@ function SidebarContent() {
           })}
         </nav>
 
-        {/* Logout Footer */}
         <div className="p-3 bg-white border-t border-slate-200">
           <button
             onClick={handleLogout}
