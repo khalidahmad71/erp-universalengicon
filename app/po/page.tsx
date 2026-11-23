@@ -13,11 +13,10 @@ interface MaterialRequest {
   id: string;
   mr_number: string;
   project_name: string;
-  material_name: string;
+  material_desc: string;
   quantity: number;
-  unit?: string;
-  status?: string;
-  requested_by?: string;
+  requested_by?: string | null;
+  status?: string | null;
   created_at?: string;
 }
 
@@ -58,7 +57,7 @@ export default function PurchaseOrdersPage() {
     const [mrRes, poRes] = await Promise.all([
       supabase
         .from('material_requests')
-        .select('*')
+        .select('id, mr_number, project_name, material_desc, quantity, requested_by, status, created_at')
         .order('created_at', { ascending: false }),
       supabase
         .from('purchase_orders')
@@ -69,13 +68,12 @@ export default function PurchaseOrdersPage() {
     if (!mrRes.error && mrRes.data) {
       const normalizedMRs: MaterialRequest[] = mrRes.data.map((row: any) => ({
         id: String(row.id),
-        mr_number: row.mr_number || row.mr_no || `MR-${row.id}`,
-        project_name: row.project_name || row.project_site || row.site_name || '',
-        material_name: row.material_name || row.item_name || row.material || '',
-        quantity: Number(row.quantity ?? row.qty_needed ?? 0),
-        unit: row.unit || 'Nos',
-        status: row.status || 'Pending',
-        requested_by: row.requested_by || '',
+        mr_number: row.mr_number || `MR-${row.id}`,
+        project_name: row.project_name || '',
+        material_desc: row.material_desc || '',
+        quantity: Number(row.quantity ?? 0),
+        requested_by: row.requested_by ?? null,
+        status: row.status ?? 'Pending',
         created_at: row.created_at,
       }));
       setMaterialRequests(normalizedMRs);
@@ -100,7 +98,7 @@ export default function PurchaseOrdersPage() {
     }
 
     setSelectedProject(mr.project_name);
-    if (mr.material_name) setSelectedMaterial(mr.material_name);
+    if (mr.material_desc) setSelectedMaterial(mr.material_desc);
     if (mr.quantity > 0) setPoQuantity(String(mr.quantity));
   };
 
@@ -211,7 +209,7 @@ export default function PurchaseOrdersPage() {
                 </option>
                 {materialRequests.map((mr) => (
                   <option key={mr.id} value={mr.id}>
-                    {mr.mr_number} — {mr.project_name} | {mr.material_name} ({mr.quantity} {mr.unit || ''}) [{mr.status || 'Pending'}]
+                    {mr.mr_number} — {mr.project_name} | {mr.material_desc} (Qty: {mr.quantity}) [{mr.status || 'Pending'}]
                   </option>
                 ))}
               </select>
@@ -272,7 +270,7 @@ export default function PurchaseOrdersPage() {
                 required
                 value={selectedMaterial}
                 onChange={(e) => setSelectedMaterial(e.target.value)}
-                placeholder="Material Name"
+                placeholder="Material Description"
                 className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900"
               />
             </div>

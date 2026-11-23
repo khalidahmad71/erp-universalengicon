@@ -1,174 +1,341 @@
-"use client";
+'use client';
 
-import { useState, useEffect } from "react";
-import { supabase } from "@/utils/supabase";
-import { ArrowLeft, Plus, ClipboardList, Send, Clock, CheckCircle } from "lucide-react";
-import Link from "next/link";
+import React, { useEffect, useState } from 'react';
+import { createClient } from '@supabase/supabase-js';
+import { Send, ClipboardList, CheckCircle2 } from 'lucide-react';
 
-export default function MRPage() {
-  const [mrList, setMrList] = useState<any[]>([]);
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
+
+interface MaterialRequestRow {
+  id: number | string;
+  mr_number: string;
+  project_name: string;
+  material_desc: string;
+  quantity: number;
+  requested_by?: string | null;
+  status?: string | null;
+  created_at?: string;
+}
+
+const SITE_OPTIONS = [
+  'Godrej Zen Estate Phase-2',
+  'Patna Civil & Infra Site',
+  'Kolkata Commercial Hub',
+  'Lucknow Infrastructure Project',
+  'Noida Corporate Tower',
+];
+
+const MATERIAL_OPTIONS = [
+  'Nuvoco Cement',
+  'TMT Steel Rebar (Fe-550D)',
+  'River Sand / Fine Aggregate',
+  '20mm Coarse Aggregate',
+  'Fly Ash Bricks / AAC Blocks',
+  'Bitumen / Road Material',
+];
+
+export default function MaterialRequestsPage() {
+  const [mrList, setMrList] = useState<MaterialRequestRow[]>([]);
   const [loading, setLoading] = useState(true);
-  
-  // Form States
-  const [mrNumber, setMrNumber] = useState("");
-  const [projectName, setProjectName] = useState("");
-  const [materialDesc, setMaterialDesc] = useState("");
-  const [quantity, setQuantity] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
-    generateMRNumber();
-    fetchMRs();
-  }, []);
-
-  // Automatic MR Number Generator
-  const generateMRNumber = () => {
-    const randomNum = Math.floor(100000 + Math.random() * 900000);
-    setMrNumber(`MR-UE-${randomNum}`);
-  };
+  const [selectedReferenceMrId, setSelectedReferenceMrId] = useState<string>('');
+  const [mrNumber, setMrNumber] = useState<string>(
+    `MR-UE-${Math.floor(100000 + Math.random() * 900000)}`
+  );
+  const [projectName, setProjectName] = useState<string>('');
+  const [materialDesc, setMaterialDesc] = useState<string>('');
+  const [quantity, setQuantity] = useState<string>('');
+  const [requestedBy, setRequestedBy] = useState<string>('Site Engineer');
+  const [feedbackMsg, setFeedbackMsg] = useState<string>('');
 
   const fetchMRs = async () => {
-    const { data, error } = await supabase
-      .from("material_requests")
-      .select("*")
-      .order("created_at", { ascending: false });
-    
-    if (data) setMrList(data);
-    setLoading(false);
-  };
-
-  const handleSaveMR = async (e: React.FormEvent) => {
-    e.preventDefault();
     setLoading(true);
+    const { data, error } = await supabase
+      .from('material_requests')
+      .select('id, mr_number, project_name, material_desc, quantity, requested_by, status, created_at')
+      .order('created_at', { ascending: false });
 
-    const { error } = await supabase.from("material_requests").insert([
-      {
-        mr_number: mrNumber,
-        project_name: projectName,
-        material_desc: materialDesc,
-        quantity: parseFloat(quantity),
-        status: 'Pending'
-      },
-    ]);
-
-    if (!error) {
-      setMaterialDesc("");
-      setQuantity("");
-      generateMRNumber(); 
-      fetchMRs();
-    } else {
-      alert("Error saving MR: " + error.message);
+    if (!error && data) {
+      setMrList(data);
     }
     setLoading(false);
   };
 
+  useEffect(() => {
+    fetchMRs();
+  }, []);
+
+  const handleSelectExistingMR = (mrId: string) => {
+    setSelectedReferenceMrId(mrId);
+    setFeedbackMsg('');
+
+    const matched = mrList.find((item) => String(item.id) === mrId);
+    if (!matched) {
+      return;
+    }
+
+    // MR select karte hi uska Project / Site automatically set ho jaaye
+    setProjectName(matched.project_name || '');
+    if (matched.material_desc) {
+      setMaterialDesc(matched.material_desc);
+    }
+    if (matched.quantity !== undefined && matched.quantity !== null) {
+      setQuantity(String(matched.quantity));
+    }
+    if (matched.requested_by) {
+      setRequestedBy(matched.requested_by);
+    }
+
+    setFeedbackMsg(
+      `Auto-selected Project "${matched.project_name}" from ${matched.mr_number}.`
+    );
+  };
+
+  const handleCreateMR = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!projectName.trim() || !materialDesc.trim() || Number(quantity) <= 0) {
+      alert('Please select or enter Project / Site Name, Material, and valid Quantity.');
+      return;
+    }
+
+    setSubmitting(true);
+    setFeedbackMsg('');
+
+    const { error } = await supabase.from('material_requests').insert([
+      {
+        mr_number: mrNumber.trim(),
+        project_name: projectName.trim(),
+        material_desc: materialDesc.trim(),
+        quantity: Number(quantity),
+        requested_by: requestedBy.trim() || 'Site Engineer',
+        status: 'Pending',
+      },
+    ]);
+
+    setSubmitting(false);
+
+    if (error) {
+      alert('Error creating MR: ' + error.message);
+      return;
+    }
+
+    setMrNumber(`MR-UE-${Math.floor(100000 + Math.random() * 900000)}`);
+    setSelectedReferenceMrId('');
+    setQuantity('');
+    setFeedbackMsg('Material Request sent to Purchase Department.');
+    await fetchMRs();
+  };
+
   return (
-    <div className="min-h-screen bg-slate-50 font-sans p-6">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-8 bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+    <div className="min-h-screen bg-slate-50/70 p-6 lg:p-8">
+      <div className="max-w-7xl mx-auto space-y-6">
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
-            <h1 className="text-2xl font-black text-slate-800 flex items-center gap-2">
-              <ClipboardList className="text-blue-600" />
+            <span className="text-[11px] font-bold uppercase tracking-wider text-blue-700">
+              Universal Engicon Pvt. Ltd. • Procurement Indent
+            </span>
+            <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight mt-0.5">
               Material Requests (MR)
             </h1>
-            <p className="text-slate-500 text-sm mt-1">Site material demands to Purchase Department</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Site material demands to Purchase Department
+            </p>
           </div>
-          <Link href="/" className="flex items-center gap-2 text-slate-600 hover:text-blue-600 font-medium bg-slate-100 px-4 py-2 rounded-lg transition-colors">
-            <ArrowLeft size={18} /> Dashboard
-          </Link>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Create MR Form */}
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 lg:col-span-1 h-fit">
-            <h2 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-              <Plus size={20} className="text-blue-600" /> Raise New Demand
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* Left Form: + Raise New Demand */}
+          <div className="lg:col-span-5 bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
+            <h2 className="text-base font-extrabold text-slate-900 border-b border-slate-100 pb-3">
+              + Raise New Demand
             </h2>
-            <form onSubmit={handleSaveMR} className="space-y-4">
+
+            {feedbackMsg && (
+              <div className="p-3 rounded-xl bg-blue-50 border border-blue-200 text-blue-900 text-xs font-semibold flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-blue-700 shrink-0" />
+                <span>{feedbackMsg}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleCreateMR} className="space-y-4">
+              {/* Existing MR Selector -> Auto-fills Project / Site */}
               <div>
-                <label className="block text-sm font-semibold text-slate-700">MR Number</label>
-                <input readOnly type="text" value={mrNumber} className="mt-1 block w-full px-4 py-2 bg-slate-100 border border-slate-200 rounded-lg outline-none font-mono text-slate-600 font-bold" />
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Select Existing MR (Auto-Fills Project Site)
+                </label>
+                <select
+                  value={selectedReferenceMrId}
+                  onChange={(e) => handleSelectExistingMR(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-blue-50/50 border border-blue-200 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:border-blue-700 focus:outline-none"
+                >
+                  <option value="">
+                    {loading
+                      ? 'Loading MRs...'
+                      : '-- Choose MR to Auto-Select Project --'}
+                  </option>
+                  {mrList.map((mr) => (
+                    <option key={mr.id} value={String(mr.id)}>
+                      {mr.mr_number} • {mr.project_name} ({mr.material_desc})
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-slate-700">Project / Site Name</label>
-                <select required value={projectName} onChange={(e) => setProjectName(e.target.value)} className="mt-1 block w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500">
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  MR Number
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={mrNumber}
+                  onChange={(e) => setMrNumber(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono font-bold text-slate-900"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Project / Site Name (Auto-Selected from MR) *
+                </label>
+                <select
+                  required
+                  value={projectName}
+                  onChange={(e) => setProjectName(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:border-blue-700 focus:outline-none"
+                >
                   <option value="">Select Site</option>
-                  <option value="Godrej Zen Estate Phase-2">Godrej Zen Estate Phase-2</option>
-                  <option value="S. Raza Millennium School">S. Raza Millennium School</option>
-                  <option value="Universal Engicon HQ">Universal Engicon HQ</option>
+                  {projectName && !SITE_OPTIONS.includes(projectName) && (
+                    <option value={projectName}>{projectName}</option>
+                  )}
+                  {SITE_OPTIONS.map((site) => (
+                    <option key={site} value={site}>
+                      {site}
+                    </option>
+                  ))}
                 </select>
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-slate-700">Required Material</label>
-                <select required value={materialDesc} onChange={(e) => setMaterialDesc(e.target.value)} className="mt-1 block w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500">
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Required Material *
+                </label>
+                <select
+                  required
+                  value={materialDesc}
+                  onChange={(e) => setMaterialDesc(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:border-blue-700 focus:outline-none"
+                >
                   <option value="">Select Material</option>
-                  <option value="Nuvoco Cement">Nuvoco Cement</option>
-                  <option value="TMT Steel Bars">TMT Steel Bars</option>
-                  <option value="Red Bricks">Red Bricks</option>
-                  <option value="River Sand">River Sand</option>
+                  {materialDesc && !MATERIAL_OPTIONS.includes(materialDesc) && (
+                    <option value={materialDesc}>{materialDesc}</option>
+                  )}
+                  {MATERIAL_OPTIONS.map((mat) => (
+                    <option key={mat} value={mat}>
+                      {mat}
+                    </option>
+                  ))}
                 </select>
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-slate-700">Quantity Needed</label>
-                <input required type="number" step="any" value={quantity} onChange={(e) => setQuantity(e.target.value)} className="mt-1 block w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500" placeholder="e.g. 100" />
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Quantity Needed *
+                </label>
+                <input
+                  type="number"
+                  required
+                  min="1"
+                  placeholder="e.g. 100"
+                  value={quantity}
+                  onChange={(e) => setQuantity(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900"
+                />
               </div>
 
-              <button disabled={loading} type="submit" className="w-full mt-4 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition-colors shadow-sm">
-                <Send size={18} /> {loading ? "Sending..." : "Send Request to Purchase"}
+              <button
+                type="submit"
+                disabled={submitting}
+                className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 bg-blue-800 hover:bg-blue-900 text-white font-bold text-xs rounded-xl shadow cursor-pointer"
+              >
+                <Send className="w-4 h-4" />
+                {submitting ? 'Sending Request...' : 'Send Request to Purchase'}
               </button>
             </form>
           </div>
 
-          {/* MR List Table */}
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 lg:col-span-2 overflow-x-auto">
-            <h2 className="text-lg font-bold text-slate-800 mb-4">Recent Material Requests from Sites</h2>
-            <table className="w-full text-left border-collapse min-w-[600px]">
-              <thead>
-                <tr className="bg-slate-100 text-slate-600 text-sm">
-                  <th className="p-3 rounded-l-lg font-semibold">MR Number</th>
-                  <th className="p-3 font-semibold">Project Site</th>
-                  <th className="p-3 font-semibold">Material Needed</th>
-                  <th className="p-3 rounded-r-lg font-semibold text-center">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading && mrList.length === 0 ? (
-                  <tr><td colSpan={4} className="p-4 text-center text-slate-500">Loading...</td></tr>
-                ) : mrList.length === 0 ? (
-                  <tr><td colSpan={4} className="p-4 text-center text-slate-500">No requests from site yet.</td></tr>
-                ) : (
-                  mrList.map((item) => (
-                    <tr key={item.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors text-sm">
-                      <td className="p-3">
-                        <span className="font-mono font-bold text-slate-700 bg-slate-100 px-2 py-1 rounded">{item.mr_number}</span>
-                      </td>
-                      <td className="p-3">
-                        <p className="font-bold text-slate-800">{item.project_name}</p>
-                        <p className="text-xs text-slate-500">Requested by: {item.requested_by}</p>
-                      </td>
-                      <td className="p-3">
-                        <p className="text-slate-700 font-medium">{item.material_desc}</p>
-                        <p className="text-xs font-bold text-blue-600">Qty: {item.quantity}</p>
-                      </td>
-                      <td className="p-3 text-center">
-                        {item.status === 'Pending' ? (
-                          <span className="inline-flex items-center gap-1 bg-amber-100 text-amber-700 px-3 py-1 rounded-full text-xs font-bold">
-                            <Clock size={14} /> Pending
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full text-xs font-bold">
-                            <CheckCircle size={14} /> {item.status}
-                          </span>
-                        )}
+          {/* Right Table: Recent Material Requests from Sites */}
+          <div className="lg:col-span-7 bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
+            <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ClipboardList className="w-4 h-4 text-slate-600" />
+                <h2 className="text-sm font-extrabold text-slate-900">
+                  Recent Material Requests from Sites
+                </h2>
+              </div>
+              <span className="text-xs font-bold text-slate-500">
+                {mrList.length} MRs
+              </span>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider border-b border-slate-200">
+                    <th className="py-3.5 px-4">MR Number</th>
+                    <th className="py-3.5 px-4">Project Site</th>
+                    <th className="py-3.5 px-4">Material Needed</th>
+                    <th className="py-3.5 px-4">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {loading ? (
+                    <tr>
+                      <td colSpan={4} className="py-10 text-center text-slate-500">
+                        Loading material requests...
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : mrList.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="py-10 text-center text-slate-500">
+                        No material requests raised yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    mrList.map((mr) => (
+                      <tr
+                        key={mr.id}
+                        onClick={() => handleSelectExistingMR(String(mr.id))}
+                        className="hover:bg-blue-50/40 cursor-pointer transition-colors"
+                      >
+                        <td className="py-3.5 px-4 font-mono font-bold text-slate-800">
+                          {mr.mr_number}
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <div className="font-bold text-slate-900">{mr.project_name}</div>
+                          <div className="text-[11px] text-slate-500">
+                            Requested by: {mr.requested_by || 'Site Engineer'}
+                          </div>
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <div className="font-semibold text-slate-800">{mr.material_desc}</div>
+                          <div className="text-[11px] text-slate-500">Qty: {mr.quantity}</div>
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                            {mr.status || 'Pending'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
