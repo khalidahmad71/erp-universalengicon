@@ -56,15 +56,16 @@ export default function VendorMasterPage() {
     try {
       const { data, error } = await supabase
         .from('vendors')
-        .select('*')
-        .order('created_at', { ascending: false });
+        .select('*');
 
       if (!error && Array.isArray(data)) {
         setVendors(
           data.map((row: any, idx: number) => ({
             id: String(row?.id ?? idx),
             vendor_code: String(row?.vendor_code || `VND-${idx + 1}`),
-            vendor_name: String(row?.vendor_name || ''),
+            vendor_name: String(
+              row?.vendor_name || row?.name || row?.firm_name || 'Unnamed Vendor'
+            ),
             category: String(row?.category || 'Material Supplier'),
             gstin: row?.gstin ? String(row.gstin) : '',
             pan: row?.pan ? String(row.pan) : '',
