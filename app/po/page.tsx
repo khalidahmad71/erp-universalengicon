@@ -13,10 +13,9 @@ import {
   Lock,
 } from 'lucide-react';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 interface MaterialRequest {
   id: string;
@@ -50,11 +49,15 @@ interface PurchaseOrder {
 }
 
 function getCookieValue(name: string): string {
-  if (typeof document === 'undefined') return '';
-  const match = document.cookie
-    .split('; ')
-    .find((row) => row.startsWith(`${name}=`));
-  return match ? decodeURIComponent(match.split('=')[1]) : '';
+  if (typeof document === 'undefined' || !document.cookie) return '';
+  const parts = document.cookie.split('; ');
+  for (let i = 0; i < parts.length; i++) {
+    const row = parts[i];
+    if (row.indexOf(`${name}=`) === 0) {
+      return decodeURIComponent(row.slice(name.length + 1));
+    }
+  }
+  return '';
 }
 
 function getInitialRouting(amount: number): {
@@ -62,21 +65,22 @@ function getInitialRouting(amount: number): {
   status: string;
   chainLabel: string;
 } {
-  if (amount > 1000000) {
+  const num = Number(amount || 0);
+  if (num > 1000000) {
     return {
       approverRole: 'Purchase Manager',
       status: 'Pending Approval (Purchase Manager)',
       chainLabel: 'Purchase Officer → Purchase Manager → VP Procurement → MD',
     };
   }
-  if (amount >= 200000) {
+  if (num >= 200000) {
     return {
       approverRole: 'Purchase Manager',
       status: 'Pending Approval (Purchase Manager)',
       chainLabel: 'Purchase Officer → Purchase Manager → VP Procurement',
     };
   }
-  if (amount >= 20000) {
+  if (num >= 20000) {
     return {
       approverRole: 'Purchase Manager',
       status: 'Pending Approval (Purchase Manager)',
@@ -91,18 +95,18 @@ function getInitialRouting(amount: number): {
 }
 
 function getNextStepAfterApproval(
-  currentApproverRole: string,
+  currentApproverRole: string | null | undefined,
   amount: number
 ): {
   nextApproverRole: string;
   nextStatus: string;
   isFinal: boolean;
 } {
-  const role = (currentApproverRole || '').toLowerCase();
+  const role = String(currentApproverRole || '').toLowerCase();
+  const num = Number(amount || 0);
 
-  // Step 1: Purchase Manager approved
-  if (role.includes('purchase manager')) {
-    if (amount >= 200000) {
+  if (role.indexOf('purchase manager') !== -1) {
+    if (num >= 200000) {
       return {
         nextApproverRole: 'VP Procurement',
         nextStatus: 'Pending Approval (VP Procurement)',
@@ -116,9 +120,8 @@ function getNextStepAfterApproval(
     };
   }
 
-  // Step 2: VP Procurement approved
-  if (role.includes('vp procurement')) {
-    if (amount > 1000000) {
+  if (role.indexOf('vp procurement') !== -1) {
+    if (num > 1000000) {
       return {
         nextApproverRole: 'Managing Director',
         nextStatus: 'Pending Approval (MD)',
@@ -132,7 +135,6 @@ function getNextStepAfterApproval(
     };
   }
 
-  // Step 3: Managing Director approved (> 10,00,000)
   return {
     nextApproverRole: 'Completed',
     nextStatus: 'Approved & Issued',
@@ -142,7 +144,7 @@ function getNextStepAfterApproval(
 
 function PurchaseOrdersContent() {
   const searchParams = useSearchParams();
-  const mrIdFromQuery = searchParams.get('mrId');
+  const mrIdFromQuery = searchParams ? searchParams.get('mrId') : null;
 
   const [materialRequests, setMaterialRequests] = useState<MaterialRequest[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
@@ -166,51 +168,59 @@ function PurchaseOrdersContent() {
 
   const fetchData = async () => {
     setLoading(true);
-    const [mrRes, poRes] = await Promise.all([
-      supabase
-        .from('material_requests')
-        .select('id, mr_number, project_name, material_desc, quantity, requested_by, status, created_at')
-        .order('created_at', { ascending: false }),
-      supabase
-        .from('purchase_orders')
-        .select('*')
-        .order('created_at', { ascending: false }),
-    ]);
+    try {
+      const [mrRes, poRes] = await Promise.all([
+        supabase
+          .from('material_requests')
+          .select('id, mr_number, project_name, material_desc, quantity, requested_by, status, created_at')
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('purchase_orders')
+          .select('*')
+          .order('created_at', { ascending: false }),
+      ]);
 
-    if (!mrRes.error && Array.isArray(mrRes.data)) {
-      const normalizedMRs: MaterialRequest[] = mrRes.data.map((row: any) => ({
-        id: String(row.id),
-        mr_number: row.mr_number || `MR-${row.id}`,
-        project_name: row.project_name || '',
-        material_desc: row.material_desc || '',
-        quantity: Number(row.quantity ?? 0),
-        requested_by: row.requested_by ?? null,
-        status: row.status ?? 'Pending',
-        created_at: row.created_at,
-      }));
-      setMaterialRequests(normalizedMRs);
+      if (!mrRes.error && Array.isArray(mrRes.data)) {
+        const normalizedMRs: MaterialRequest[] = mrRes.data.map((row: any, idx: number) => ({
+          id: String(row?.id ?? idx),
+          mr_number: String(row?.mr_number || `MR-${row?.id ?? idx}`),
+          project_name: String(row?.project_name || ''),
+          material_desc: String(row?.material_desc || ''),
+          quantity: Number(row?.quantity ?? 0),
+          requested_by: row?.requested_by ? String(row.requested_by) : null,
+          status: row?.status ? String(row.status) : 'Pending',
+          created_at: row?.created_at,
+        }));
+        setMaterialRequests(normalizedMRs);
+      }
+
+      if (!poRes.error && Array.isArray(poRes.data)) {
+        const normalizedPOs: PurchaseOrder[] = poRes.data.map((row: any, idx: number) => ({
+          id: String(row?.id ?? idx),
+          po_number: String(row?.po_number || `PO-${row?.id ?? idx}`),
+          mr_number: row?.mr_number ? String(row.mr_number) : null,
+          project_name: String(row?.project_name || ''),
+          vendor_name: String(row?.vendor_name || ''),
+          material_name: String(row?.material_name || ''),
+          quantity: Number(row?.quantity ?? 0),
+          rate: Number(row?.rate ?? 0),
+          gst_percent: Number(row?.gst_percent ?? 18),
+          total_amount: Number(row?.total_amount ?? 0),
+          status: row?.status ? String(row.status) : 'Approved & Issued',
+          approver_role: row?.approver_role ? String(row.approver_role) : '',
+          created_by: row?.created_by ? String(row.created_by) : '',
+          approved_by: row?.approved_by ? String(row.approved_by) : '',
+          approved_at: row?.approved_at ? String(row.approved_at) : '',
+          approval_trail: row?.approval_trail ? String(row.approval_trail) : '',
+          created_at: row?.created_at,
+        }));
+        setPurchaseOrders(normalizedPOs);
+      }
+    } catch (err) {
+      console.error('Error fetching PO data:', err);
+    } finally {
+      setLoading(false);
     }
-
-    if (!poRes.error && Array.isArray(poRes.data)) {
-      const normalizedPOs: PurchaseOrder[] = poRes.data.map((row: any) => ({
-        ...row,
-        id: String(row.id),
-        po_number: row.po_number || `PO-${row.id}`,
-        project_name: row.project_name || '',
-        vendor_name: row.vendor_name || '',
-        material_name: row.material_name || '',
-        quantity: Number(row.quantity ?? 0),
-        rate: Number(row.rate ?? 0),
-        gst_percent: Number(row.gst_percent ?? 18),
-        total_amount: Number(row.total_amount ?? 0),
-        status: row.status || 'Approved & Issued',
-        approver_role: row.approver_role || '',
-        approval_trail: row.approval_trail || '',
-      }));
-      setPurchaseOrders(normalizedPOs);
-    }
-
-    setLoading(false);
   };
 
   useEffect(() => {
@@ -222,7 +232,7 @@ function PurchaseOrdersContent() {
   }, []);
 
   const handleSelectMR = (mrId: string, sourceList?: MaterialRequest[]) => {
-    const listToSearch = sourceList || materialRequests;
+    const listToSearch = Array.isArray(sourceList) ? sourceList : materialRequests;
     setSelectedMrId(mrId);
     const mr = listToSearch.find((item) => item.id === mrId);
     if (!mr) {
@@ -242,7 +252,7 @@ function PurchaseOrdersContent() {
         handleSelectMR(String(mrIdFromQuery), materialRequests);
       }
     }
-  }, [mrIdFromQuery, materialRequests]);
+  }, [mrIdFromQuery, materialRequests, selectedMrId]);
 
   const qtyNum = Number(poQuantity || 0);
   const rateNum = Number(poRate || 0);
@@ -254,20 +264,20 @@ function PurchaseOrdersContent() {
   const routingPreview = getInitialRouting(totalAmount);
 
   const canCurrentUserApprove = (po: PurchaseOrder): boolean => {
-    const statusStr = po.status || '';
-    if (!statusStr.startsWith('Pending Approval')) return false;
+    const statusStr = String(po?.status || '');
+    if (statusStr.indexOf('Pending Approval') !== 0) return false;
 
-    const roleNorm = (currentRole || '').toLowerCase();
-    const required = (po.approver_role || '').toLowerCase();
+    const roleNorm = String(currentRole || '').toLowerCase();
+    const required = String(po?.approver_role || '').toLowerCase();
 
-    if (required.includes('purchase manager')) {
-      return roleNorm.includes('purchase manager');
+    if (required.indexOf('purchase manager') !== -1) {
+      return roleNorm.indexOf('purchase manager') !== -1;
     }
-    if (required.includes('vp procurement')) {
-      return roleNorm.includes('vp procurement') || roleNorm.includes('vp');
+    if (required.indexOf('vp procurement') !== -1) {
+      return roleNorm.indexOf('vp procurement') !== -1 || roleNorm.indexOf('vp') !== -1;
     }
-    if (required.includes('managing director')) {
-      return roleNorm.includes('managing director') || roleNorm === 'md';
+    if (required.indexOf('managing director') !== -1) {
+      return roleNorm.indexOf('managing director') !== -1 || roleNorm === 'md';
     }
     return false;
   };
@@ -382,7 +392,10 @@ function PurchaseOrdersContent() {
       style: 'currency',
       currency: 'INR',
       maximumFractionDigits: 0,
-    }).format(val);
+    }).format(Number(val || 0));
+
+  const safePOs = Array.isArray(purchaseOrders) ? purchaseOrders : [];
+  const safeMRs = Array.isArray(materialRequests) ? materialRequests : [];
 
   return (
     <div className="min-h-screen bg-slate-50/70 p-6 lg:p-8">
@@ -405,6 +418,7 @@ function PurchaseOrdersContent() {
               Role: <span className="text-blue-800">{currentRole}</span>
             </span>
             <button
+              type="button"
               onClick={() => window.print()}
               className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-50 cursor-pointer"
             >
@@ -446,7 +460,7 @@ function PurchaseOrdersContent() {
                     ? 'Loading Material Requests...'
                     : '-- Select MR (Shows Site, Material & Qty) --'}
                 </option>
-                {materialRequests.map((mr) => (
+                {safeMRs.map((mr) => (
                   <option key={mr.id} value={mr.id}>
                     {mr.mr_number} — {mr.project_name} | {mr.material_desc} (Qty: {mr.quantity}) [{mr.status || 'Pending'}]
                   </option>
@@ -600,7 +614,7 @@ function PurchaseOrdersContent() {
               </h3>
             </div>
             <span className="text-xs font-bold text-slate-500">
-              {purchaseOrders.length} POs
+              {safePOs.length} POs
             </span>
           </div>
 
@@ -617,40 +631,40 @@ function PurchaseOrdersContent() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {purchaseOrders.length === 0 ? (
+                {safePOs.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="py-10 text-center text-slate-500">
                       No purchase orders created yet.
                     </td>
                   </tr>
                 ) : (
-                  purchaseOrders.map((po) => {
-                    const statusText = po.status || 'Approved & Issued';
+                  safePOs.map((po, idx) => {
+                    const statusText = String(po?.status || 'Approved & Issued');
                     const isApproved =
                       statusText === 'Approved & Issued' ||
                       statusText === 'Issued' ||
                       statusText === 'GRN Completed' ||
                       statusText === 'Partially Received';
                     const allowedToApprove = canCurrentUserApprove(po);
-                    const amount = Number(po.total_amount || 0);
+                    const amount = Number(po?.total_amount || 0);
                     const nextStepPreview = getNextStepAfterApproval(
-                      po.approver_role || '',
+                      po?.approver_role,
                       amount
                     );
 
                     return (
-                      <tr key={po.id} className="hover:bg-slate-50/80">
+                      <tr key={String(po?.id || idx)} className="hover:bg-slate-50/80">
                         <td className="py-3.5 px-4">
-                          <div className="font-mono font-bold text-blue-700">{po.po_number}</div>
+                          <div className="font-mono font-bold text-blue-700">{po?.po_number || '-'}</div>
                           <div className="font-mono text-[11px] text-slate-500">
-                            MR: {po.mr_number || '-'}
+                            MR: {po?.mr_number || '-'}
                           </div>
                         </td>
-                        <td className="py-3.5 px-4 font-bold text-slate-900">{po.project_name}</td>
+                        <td className="py-3.5 px-4 font-bold text-slate-900">{po?.project_name || '-'}</td>
                         <td className="py-3.5 px-4">
-                          <div className="font-semibold text-slate-800">{po.vendor_name}</div>
+                          <div className="font-semibold text-slate-800">{po?.vendor_name || '-'}</div>
                           <div className="text-[11px] text-slate-500">
-                            {po.material_name} (Qty: {po.quantity})
+                            {po?.material_name || '-'} (Qty: {Number(po?.quantity || 0)})
                           </div>
                         </td>
                         <td className="py-3.5 px-4 text-right font-extrabold text-slate-900">
@@ -673,7 +687,7 @@ function PurchaseOrdersContent() {
                               {statusText}
                             </span>
                           </div>
-                          {po.approval_trail && (
+                          {po?.approval_trail && (
                             <div className="text-[11px] text-slate-500 leading-snug">
                               {po.approval_trail}
                             </div>
@@ -687,12 +701,12 @@ function PurchaseOrdersContent() {
                           ) : allowedToApprove ? (
                             <button
                               type="button"
-                              disabled={approvingId === String(po.id)}
+                              disabled={approvingId === String(po?.id)}
                               onClick={() => handleApprovePO(po)}
                               className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-[11px] rounded-lg shadow-2xs cursor-pointer"
                             >
                               <ShieldCheck className="w-3.5 h-3.5" />
-                              {approvingId === String(po.id)
+                              {approvingId === String(po?.id)
                                 ? 'Approving...'
                                 : nextStepPreview.isFinal
                                 ? 'Final Approve PO'
@@ -700,11 +714,11 @@ function PurchaseOrdersContent() {
                             </button>
                           ) : (
                             <span
-                              title={`Awaiting ${po.approver_role || 'Approval'}`}
+                              title={`Awaiting ${po?.approver_role || 'Approval'}`}
                               className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 text-slate-500 text-[11px] font-semibold"
                             >
                               <Lock className="w-3 h-3" />
-                              Awaiting {po.approver_role || 'Approval'}
+                              Awaiting {po?.approver_role || 'Approval'}
                             </span>
                           )}
                         </td>
