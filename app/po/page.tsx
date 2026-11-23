@@ -40,7 +40,7 @@ interface PurchaseOrder {
   rate: number;
   gst_percent: number;
   total_amount: number;
-  status: string;
+  status?: string | null;
   approver_role?: string | null;
   created_by?: string | null;
   approved_by?: string | null;
@@ -98,7 +98,7 @@ function getNextStepAfterApproval(
   nextStatus: string;
   isFinal: boolean;
 } {
-  const role = currentApproverRole.toLowerCase();
+  const role = (currentApproverRole || '').toLowerCase();
 
   // Step 1: Purchase Manager approved
   if (role.includes('purchase manager')) {
@@ -177,7 +177,7 @@ function PurchaseOrdersContent() {
         .order('created_at', { ascending: false }),
     ]);
 
-    if (!mrRes.error && mrRes.data) {
+    if (!mrRes.error && Array.isArray(mrRes.data)) {
       const normalizedMRs: MaterialRequest[] = mrRes.data.map((row: any) => ({
         id: String(row.id),
         mr_number: row.mr_number || `MR-${row.id}`,
@@ -191,9 +191,25 @@ function PurchaseOrdersContent() {
       setMaterialRequests(normalizedMRs);
     }
 
-    if (!poRes.error && poRes.data) {
-      setPurchaseOrders(poRes.data);
+    if (!poRes.error && Array.isArray(poRes.data)) {
+      const normalizedPOs: PurchaseOrder[] = poRes.data.map((row: any) => ({
+        ...row,
+        id: String(row.id),
+        po_number: row.po_number || `PO-${row.id}`,
+        project_name: row.project_name || '',
+        vendor_name: row.vendor_name || '',
+        material_name: row.material_name || '',
+        quantity: Number(row.quantity ?? 0),
+        rate: Number(row.rate ?? 0),
+        gst_percent: Number(row.gst_percent ?? 18),
+        total_amount: Number(row.total_amount ?? 0),
+        status: row.status || 'Approved & Issued',
+        approver_role: row.approver_role || '',
+        approval_trail: row.approval_trail || '',
+      }));
+      setPurchaseOrders(normalizedPOs);
     }
+
     setLoading(false);
   };
 
@@ -238,8 +254,10 @@ function PurchaseOrdersContent() {
   const routingPreview = getInitialRouting(totalAmount);
 
   const canCurrentUserApprove = (po: PurchaseOrder): boolean => {
-    if (!po.status.startsWith('Pending Approval')) return false;
-    const roleNorm = currentRole.toLowerCase();
+    const statusStr = po.status || '';
+    if (!statusStr.startsWith('Pending Approval')) return false;
+
+    const roleNorm = (currentRole || '').toLowerCase();
     const required = (po.approver_role || '').toLowerCase();
 
     if (required.includes('purchase manager')) {
@@ -315,7 +333,7 @@ function PurchaseOrdersContent() {
 
   const handleApprovePO = async (po: PurchaseOrder) => {
     if (!canCurrentUserApprove(po)) {
-      alert(`Only ${po.approver_role} can approve this stage.`);
+      alert(`Only ${po.approver_role || 'authorized authority'} can approve this stage.`);
       return;
     }
 
@@ -607,7 +625,12 @@ function PurchaseOrdersContent() {
                   </tr>
                 ) : (
                   purchaseOrders.map((po) => {
-                    const isApproved = po.status === 'Approved & Issued' || po.status === 'Issued';
+                    const statusText = po.status || 'Approved & Issued';
+                    const isApproved =
+                      statusText === 'Approved & Issued' ||
+                      statusText === 'Issued' ||
+                      statusText === 'GRN Completed' ||
+                      statusText === 'Partially Received';
                     const allowedToApprove = canCurrentUserApprove(po);
                     const amount = Number(po.total_amount || 0);
                     const nextStepPreview = getNextStepAfterApproval(
@@ -647,7 +670,7 @@ function PurchaseOrdersContent() {
                               ) : (
                                 <Clock className="w-3 h-3" />
                               )}
-                              {po.status}
+                              {statusText}
                             </span>
                           </div>
                           {po.approval_trail && (
@@ -677,11 +700,11 @@ function PurchaseOrdersContent() {
                             </button>
                           ) : (
                             <span
-                              title={`Awaiting ${po.approver_role}`}
+                              title={`Awaiting ${po.approver_role || 'Approval'}`}
                               className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 text-slate-500 text-[11px] font-semibold"
                             >
                               <Lock className="w-3 h-3" />
-                              Awaiting {po.approver_role}
+                              Awaiting {po.approver_role || 'Approval'}
                             </span>
                           )}
                         </td>
