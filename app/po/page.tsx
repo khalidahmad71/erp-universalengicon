@@ -28,6 +28,14 @@ interface MaterialRequest {
   created_at?: string;
 }
 
+interface VendorOption {
+  id: string;
+  vendor_code: string;
+  vendor_name: string;
+  gstin?: string | null;
+  status?: string | null;
+}
+
 interface PurchaseOrder {
   id: string;
   po_number: string;
@@ -147,6 +155,7 @@ function PurchaseOrdersContent() {
   const mrIdFromQuery = searchParams ? searchParams.get('mrId') : null;
 
   const [materialRequests, setMaterialRequests] = useState<MaterialRequest[]>([]);
+  const [vendors, setVendors] = useState<VendorOption[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -156,6 +165,7 @@ function PurchaseOrdersContent() {
   const [currentUserEmail, setCurrentUserEmail] = useState<string>('');
 
   const [selectedMrId, setSelectedMrId] = useState<string>('');
+  const [selectedVendorId, setSelectedVendorId] = useState<string>('');
   const [poNumber, setPoNumber] = useState<string>(
     `PO-UE-${Math.floor(100000 + Math.random() * 900000)}`
   );
@@ -169,7 +179,7 @@ function PurchaseOrdersContent() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [mrRes, poRes] = await Promise.all([
+      const [mrRes, poRes, vndRes] = await Promise.all([
         supabase
           .from('material_requests')
           .select('id, mr_number, project_name, material_desc, quantity, requested_by, status, created_at')
@@ -178,6 +188,10 @@ function PurchaseOrdersContent() {
           .from('purchase_orders')
           .select('*')
           .order('created_at', { ascending: false }),
+        supabase
+          .from('vendors')
+          .select('id, vendor_code, vendor_name, gstin, status')
+          .order('vendor_name', { ascending: true }),
       ]);
 
       if (!mrRes.error && Array.isArray(mrRes.data)) {
@@ -192,6 +206,19 @@ function PurchaseOrdersContent() {
           created_at: row?.created_at,
         }));
         setMaterialRequests(normalizedMRs);
+      }
+
+      if (!vndRes.error && Array.isArray(vndRes.data)) {
+        const activeVendors: VendorOption[] = vndRes.data
+          .filter((v: any) => String(v?.status || 'Active') === 'Active')
+          .map((v: any, idx: number) => ({
+            id: String(v?.id ?? idx),
+            vendor_code: String(v?.vendor_code || `VND-${idx + 1}`),
+            vendor_name: String(v?.vendor_name || ''),
+            gstin: v?.gstin ? String(v.gstin) : '',
+            status: String(v?.status || 'Active'),
+          }));
+        setVendors(activeVendors);
       }
 
       if (!poRes.error && Array.isArray(poRes.data)) {
@@ -243,6 +270,14 @@ function PurchaseOrdersContent() {
     setSelectedProject(mr.project_name);
     if (mr.material_desc) setSelectedMaterial(mr.material_desc);
     if (mr.quantity > 0) setPoQuantity(String(mr.quantity));
+  };
+
+  const handleSelectVendor = (vndId: string) => {
+    setSelectedVendorId(vndId);
+    const found = vendors.find((v) => v.id === vndId);
+    if (found) {
+      setVendorName(found.vendor_name);
+    }
   };
 
   useEffect(() => {
@@ -333,6 +368,7 @@ function PurchaseOrdersContent() {
 
     setPoNumber(`PO-UE-${Math.floor(100000 + Math.random() * 900000)}`);
     setSelectedMrId('');
+    setSelectedVendorId('');
     setSelectedProject('');
     setVendorName('');
     setSelectedMaterial('');
@@ -396,6 +432,7 @@ function PurchaseOrdersContent() {
 
   const safePOs = Array.isArray(purchaseOrders) ? purchaseOrders : [];
   const safeMRs = Array.isArray(materialRequests) ? materialRequests : [];
+  const safeVendors = Array.isArray(vendors) ? vendors : [];
 
   return (
     <div className="min-h-screen bg-slate-50/70 p-6 lg:p-8">
@@ -502,14 +539,35 @@ function PurchaseOrdersContent() {
 
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">
+                Select from Vendor Master
+              </label>
+              <select
+                value={selectedVendorId}
+                onChange={(e) => handleSelectVendor(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:border-blue-700 focus:outline-none"
+              >
+                <option value="">-- Choose Registered Vendor --</option>
+                {safeVendors.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.vendor_code} — {v.vendor_name} {v.gstin ? `(${v.gstin})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
                 Vendor Name *
               </label>
               <input
                 type="text"
                 required
                 value={vendorName}
-                onChange={(e) => setVendorName(e.target.value)}
-                placeholder="Supplier / Vendor Name"
+                onChange={(e) => {
+                  setSelectedVendorId('');
+                  setVendorName(e.target.value);
+                }}
+                placeholder="Selected or type Vendor Name"
                 className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900"
               />
             </div>
@@ -575,7 +633,7 @@ function PurchaseOrdersContent() {
               </select>
             </div>
 
-            <div className="lg:col-span-3 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
+            <div className="lg:col-span-2 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
               <div className="text-xs text-slate-700 space-y-0.5">
                 <div>
                   <span className="font-bold">Total PO Value (incl. GST): </span>

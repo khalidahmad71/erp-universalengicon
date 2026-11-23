@@ -1,467 +1,444 @@
-"use client";
+'use client';
 
-import { useEffect, useState } from "react";
-import Sidebar from "@/components/Sidebar";
-import { Users, Plus, FileText, ArrowUpRight, ArrowDownLeft, X, Wallet, Phone, Building, MapPin, Receipt } from "lucide-react";
-import { supabase } from "@/utils/supabase";
+import React, { useEffect, useState } from 'react';
+import { createClient } from '@supabase/supabase-js';
+import {
+  Building2,
+  PlusCircle,
+  Search,
+  CheckCircle2,
+  XCircle,
+} from 'lucide-react';
 
-interface Vendor {
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+interface VendorRow {
   id: string;
-  name: string;
+  vendor_code: string;
+  vendor_name: string;
   category: string;
-  phone: string;
-  company_name: string;
-  address: string;
-  gst_no: string;
-  opening_balance: number;
+  gstin?: string | null;
+  pan?: string | null;
+  contact_person?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  bank_account?: string | null;
+  ifsc_code?: string | null;
+  status: string;
+  created_at?: string;
 }
 
-interface LedgerTxn {
-  id: string;
-  vendor_id: string;
-  txn_date: string;
-  txn_type: string;
-  reference_no: string;
-  description: string;
-  debit_amount: number;
-  credit_amount: number;
-}
-
-export default function VendorLedgerPage() {
+export default function VendorMasterPage() {
+  const [vendors, setVendors] = useState<VendorRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null);
-  const [transactions, setTransactions] = useState<LedgerTxn[]>([]);
-  
-  // Modals
-  const [showVendorModal, setShowVendorModal] = useState(false);
-  const [showTxnModal, setShowTxnModal] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
 
-  // New Vendor Form
-  const [name, setName] = useState("");
-  const [category, setCategory] = useState("Material Supplier");
-  const [phone, setPhone] = useState("");
-  const [companyName, setCompanyName] = useState("");
-  const [address, setAddress] = useState("");
-  const [gstNo, setGstNo] = useState("");
-  const [openingBalance, setOpeningBalance] = useState("0");
-
-  // New Transaction Form
-  const [txnType, setTxnType] = useState("Bill / Invoice");
-  const [refNo, setRefNo] = useState("");
-  const [description, setDescription] = useState("");
-  const [amount, setAmount] = useState("");
-  const [isDebit, setIsDebit] = useState(false);
-
-  useEffect(() => {
-    fetchVendors();
-  }, []);
-
-  useEffect(() => {
-    if (selectedVendor) {
-      fetchTransactions(selectedVendor.id);
-    }
-  }, [selectedVendor]);
+  const [vendorCode, setVendorCode] = useState(
+    `VND-UE-${Math.floor(1000 + Math.random() * 9000)}`
+  );
+  const [vendorName, setVendorName] = useState('');
+  const [category, setCategory] = useState('Material Supplier');
+  const [gstin, setGstin] = useState('');
+  const [pan, setPan] = useState('');
+  const [contactPerson, setContactPerson] = useState('');
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [address, setAddress] = useState('');
+  const [bankAccount, setBankAccount] = useState('');
+  const [ifscCode, setIfscCode] = useState('');
 
   const fetchVendors = async () => {
+    setLoading(true);
     try {
-      const { data, error } = await supabase.from("vendors").select("*").order("name");
-      if (error) throw error;
-      if (data) {
-        setVendors(data);
-        if (data.length > 0 && !selectedVendor) {
-          setSelectedVendor(data[0]);
-        }
+      const { data, error } = await supabase
+        .from('vendors')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!error && Array.isArray(data)) {
+        setVendors(
+          data.map((row: any, idx: number) => ({
+            id: String(row?.id ?? idx),
+            vendor_code: String(row?.vendor_code || `VND-${idx + 1}`),
+            vendor_name: String(row?.vendor_name || ''),
+            category: String(row?.category || 'Material Supplier'),
+            gstin: row?.gstin ? String(row.gstin) : '',
+            pan: row?.pan ? String(row.pan) : '',
+            contact_person: row?.contact_person ? String(row.contact_person) : '',
+            phone: row?.phone ? String(row.phone) : '',
+            email: row?.email ? String(row.email) : '',
+            address: row?.address ? String(row.address) : '',
+            bank_account: row?.bank_account ? String(row.bank_account) : '',
+            ifsc_code: row?.ifsc_code ? String(row.ifsc_code) : '',
+            status: String(row?.status || 'Active'),
+            created_at: row?.created_at,
+          }))
+        );
       }
     } catch (err) {
-      console.error(err);
+      console.error('Error loading vendors:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchTransactions = async (vendorId: string) => {
-    const { data, error } = await supabase
-      .from("vendor_ledger")
-      .select("*")
-      .eq("vendor_id", vendorId)
-      .order("txn_date", { ascending: true });
+  useEffect(() => {
+    fetchVendors();
+  }, []);
 
-    if (!error && data) {
-      setTransactions(data);
+  const handleAddVendor = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!vendorName.trim()) {
+      alert('Please enter Vendor Name.');
+      return;
     }
+
+    setSaving(true);
+    const { error } = await supabase.from('vendors').insert([
+      {
+        vendor_code: vendorCode.trim().toUpperCase(),
+        vendor_name: vendorName.trim(),
+        category,
+        gstin: gstin.trim().toUpperCase() || null,
+        pan: pan.trim().toUpperCase() || null,
+        contact_person: contactPerson.trim() || null,
+        phone: phone.trim() || null,
+        email: email.trim() || null,
+        address: address.trim() || null,
+        bank_account: bankAccount.trim() || null,
+        ifsc_code: ifscCode.trim().toUpperCase() || null,
+        status: 'Active',
+      },
+    ]);
+    setSaving(false);
+
+    if (error) {
+      alert('Vendor Save Error: ' + error.message);
+      return;
+    }
+
+    setVendorCode(`VND-UE-${Math.floor(1000 + Math.random() * 9000)}`);
+    setVendorName('');
+    setGstin('');
+    setPan('');
+    setContactPerson('');
+    setPhone('');
+    setEmail('');
+    setAddress('');
+    setBankAccount('');
+    setIfscCode('');
+    await fetchVendors();
   };
 
-  const handleCreateVendor = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const { error } = await supabase.from("vendors").insert({
-      name,
-      category,
-      phone,
-      company_name: companyName,
-      address,
-      gst_no: gstNo.toUpperCase(),
-      opening_balance: parseFloat(openingBalance) || 0,
-    });
+  const handleToggleStatus = async (vendor: VendorRow) => {
+    const nextStatus = vendor.status === 'Active' ? 'Inactive' : 'Active';
+    const { error } = await supabase
+      .from('vendors')
+      .update({ status: nextStatus })
+      .eq('id', vendor.id);
 
     if (!error) {
-      alert("Vendor added successfully!");
-      setShowVendorModal(false);
-      setName(""); setPhone(""); setCompanyName(""); setAddress(""); setGstNo(""); setOpeningBalance("0");
-      fetchVendors();
-    } else {
-      alert("Error: " + error.message);
+      await fetchVendors();
     }
   };
 
-  const handleAddTxn = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedVendor) return;
-
-    const numAmount = parseFloat(amount) || 0;
-    const debit = isDebit ? numAmount : 0;
-    const credit = !isDebit ? numAmount : 0;
-
-    const { error } = await supabase.from("vendor_ledger").insert({
-      vendor_id: selectedVendor.id,
-      txn_type: txnType,
-      reference_no: refNo,
-      description,
-      debit_amount: debit,
-      credit_amount: credit,
-    });
-
-    if (!error) {
-      alert("Transaction recorded successfully!");
-      setShowTxnModal(false);
-      setRefNo(""); setDescription(""); setAmount("");
-      fetchTransactions(selectedVendor.id);
-    } else {
-      alert("Error: " + error.message);
-    }
-  };
-
-  // Calculate Running Balance
-  let runningBalance = selectedVendor ? Number(selectedVendor.opening_balance) : 0;
-
-  if (loading) {
+  const filteredVendors = vendors.filter((v) => {
+    const q = searchTerm.trim().toLowerCase();
+    if (!q) return true;
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <div className="w-10 h-10 border-4 border-pink-600 border-t-transparent rounded-full animate-spin"></div>
-      </div>
+      String(v.vendor_name || '').toLowerCase().indexOf(q) !== -1 ||
+      String(v.vendor_code || '').toLowerCase().indexOf(q) !== -1 ||
+      String(v.gstin || '').toLowerCase().indexOf(q) !== -1 ||
+      String(v.category || '').toLowerCase().indexOf(q) !== -1
     );
-  }
+  });
 
   return (
-    <div className="flex min-h-screen bg-slate-50 font-sans">
-      <Sidebar />
-
-      <main className="flex-1 flex flex-col min-w-0 overflow-y-auto">
-        <header className="bg-white border-b border-slate-200 h-16 px-8 flex items-center justify-between sticky top-0 z-10 shadow-sm">
-          <h2 className="font-extrabold text-slate-800 text-lg">Vendor & Contractor Ledger</h2>
-          <button
-            onClick={() => setShowVendorModal(true)}
-            className="flex items-center gap-2 bg-pink-600 hover:bg-pink-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md shadow-pink-600/20"
-          >
-            <Plus size={16} /> Add New Vendor / Contractor
-          </button>
-        </header>
-
-        <div className="p-8 max-w-7xl mx-auto w-full grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Vendors List Sidebar */}
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 space-y-3 lg:col-span-1 h-fit">
-            <h3 className="font-bold text-xs uppercase tracking-wider text-slate-400 px-2">Suppliers & Contractors</h3>
-            <div className="space-y-1 max-h-[70vh] overflow-y-auto">
-              {vendors.length === 0 ? (
-                <p className="text-xs text-slate-400 p-2">No vendors added yet.</p>
-              ) : (
-                vendors.map((v) => (
-                  <button
-                    key={v.id}
-                    onClick={() => setSelectedVendor(v)}
-                    className={`w-full text-left p-3 rounded-xl transition-all ${
-                      selectedVendor?.id === v.id
-                        ? "bg-slate-900 text-white shadow-md"
-                        : "hover:bg-slate-100 text-slate-700"
-                    }`}
-                  >
-                    <p className="font-bold text-xs truncate">{v.name}</p>
-                    <p className={`text-[10px] mt-0.5 truncate ${selectedVendor?.id === v.id ? 'text-slate-300' : 'text-slate-500'}`}>
-                      {v.company_name || v.category}
-                    </p>
-                  </button>
-                ))
-              )}
-            </div>
+    <div className="min-h-screen bg-slate-50/70 p-6 lg:p-8">
+      <div className="max-w-7xl mx-auto space-y-6">
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-blue-700">
+              Universal Engicon Pvt. Ltd. • Procurement Directory
+            </span>
+            <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight mt-0.5">
+              Vendor Master
+            </h1>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Registered Suppliers, Sub-Contractors, GSTIN, PAN &amp; Bank Details
+            </p>
           </div>
 
-          {/* Ledger Details Area */}
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 space-y-6 lg:col-span-3">
-            {selectedVendor ? (
-              <>
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center pb-6 border-b border-slate-100 gap-4">
-                  <div>
-                    <span className="bg-pink-100 text-pink-700 text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider">
-                      {selectedVendor.category}
-                    </span>
-                    <h2 className="text-xl font-black text-slate-800 mt-2">{selectedVendor.name}</h2>
-                    <p className="text-xs text-slate-600 font-semibold mt-1">
-                      {selectedVendor.company_name && <span className="text-slate-900 font-bold">{selectedVendor.company_name} | </span>}
-                      Phone: {selectedVendor.phone || 'N/A'}
-                    </p>
-                    <div className="flex flex-wrap gap-4 mt-2 text-xs text-slate-500">
-                      <span className="flex items-center gap-1"><MapPin size={13} className="text-slate-400" /> {selectedVendor.address || 'No address provided'}</span>
-                      <span className="flex items-center gap-1 font-mono font-bold text-slate-700"><Receipt size={13} className="text-pink-600" /> GSTIN: {selectedVendor.gst_no || 'N/A'}</span>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => setShowTxnModal(true)}
-                    className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl text-xs font-bold shadow-md shrink-0"
-                  >
-                    <Plus size={14} /> Add Transaction
-                  </button>
-                </div>
-
-                {/* Ledger Table */}
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead>
-                      <tr className="bg-slate-900 text-white uppercase tracking-wider">
-                        <th className="p-3 font-bold">Date</th>
-                        <th className="p-3 font-bold">Type & Ref</th>
-                        <th className="p-3 font-bold">Description</th>
-                        <th className="p-3 font-bold text-right">Debit (Paid)</th>
-                        <th className="p-3 font-bold text-right">Credit (Bill)</th>
-                        <th className="p-3 font-bold text-right">Balance</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      <tr className="bg-slate-50 font-medium">
-                        <td className="p-3 text-slate-500">-</td>
-                        <td className="p-3 font-bold text-slate-700">Opening Balance</td>
-                        <td className="p-3 text-slate-500">Initial balance brought forward</td>
-                        <td className="p-3 text-right">-</td>
-                        <td className="p-3 text-right">-</td>
-                        <td className="p-3 text-right font-black text-slate-800">
-                          ₹ {Number(selectedVendor.opening_balance).toLocaleString()}
-                        </td>
-                      </tr>
-
-                      {transactions.map((txn) => {
-                        const debit = Number(txn.debit_amount) || 0;
-                        const credit = Number(txn.credit_amount) || 0;
-                        runningBalance = runningBalance + credit - debit;
-
-                        return (
-                          <tr key={txn.id} className="hover:bg-slate-50 transition-colors">
-                            <td className="p-3 text-slate-600">{txn.txn_date}</td>
-                            <td className="p-3">
-                              <span className="font-bold text-slate-800 block">{txn.txn_type}</span>
-                              <span className="text-[10px] text-slate-400">{txn.reference_no}</span>
-                            </td>
-                            <td className="p-3 text-slate-600">{txn.description}</td>
-                            <td className="p-3 text-right font-bold text-emerald-600">
-                              {debit > 0 ? `₹ ${debit.toLocaleString()}` : '-'}
-                            </td>
-                            <td className="p-3 text-right font-bold text-pink-600">
-                              {credit > 0 ? `₹ ${credit.toLocaleString()}` : '-'}
-                            </td>
-                            <td className="p-3 text-right font-black text-slate-900">
-                              ₹ {runningBalance.toLocaleString()}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </>
-            ) : (
-              <div className="text-center py-20 text-slate-400 text-xs">
-                Select a vendor from the left sidebar to view their ledger history.
-              </div>
-            )}
+          <div className="relative w-full sm:w-72">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search name, code, GSTIN..."
+              className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900"
+            />
           </div>
         </div>
-      </main>
 
-      {/* Add Vendor Modal */}
-      {showVendorModal && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden">
-            <div className="bg-slate-900 px-6 py-4 flex justify-between items-center text-white">
-              <h3 className="font-bold text-sm">Add New Vendor / Contractor</h3>
-              <button onClick={() => setShowVendorModal(false)} className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-lg">
-                <X size={18} />
+        {/* Add Vendor Form */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-5">
+          <div className="flex items-center gap-2.5 border-b border-slate-100 pb-3">
+            <PlusCircle className="w-5 h-5 text-blue-700" />
+            <h2 className="text-base font-extrabold text-slate-900">
+              Register New Vendor / Sub-Contractor
+            </h2>
+          </div>
+
+          <form onSubmit={handleAddVendor} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Vendor Code *
+              </label>
+              <input
+                type="text"
+                required
+                value={vendorCode}
+                onChange={(e) => setVendorCode(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono font-bold text-slate-900"
+              />
+            </div>
+
+            <div className="lg:col-span-2">
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Vendor / Firm Name *
+              </label>
+              <input
+                type="text"
+                required
+                value={vendorName}
+                onChange={(e) => setVendorName(e.target.value)}
+                placeholder="e.g. UltraTech Cement / Sharma Civil Works"
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Category *
+              </label>
+              <select
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900"
+              >
+                <option value="Material Supplier">Material Supplier</option>
+                <option value="Sub-Contractor">Sub-Contractor</option>
+                <option value="Plant & Machinery Rental">Plant &amp; Machinery Rental</option>
+                <option value="Service / Transport">Service / Transport</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                GSTIN
+              </label>
+              <input
+                type="text"
+                maxLength={15}
+                value={gstin}
+                onChange={(e) => setGstin(e.target.value.toUpperCase())}
+                placeholder="10AABCU9603R1ZM"
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono font-bold text-slate-900 uppercase"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                PAN
+              </label>
+              <input
+                type="text"
+                maxLength={10}
+                value={pan}
+                onChange={(e) => setPan(e.target.value.toUpperCase())}
+                placeholder="AABCU9603R"
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono font-bold text-slate-900 uppercase"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Contact Person
+              </label>
+              <input
+                type="text"
+                value={contactPerson}
+                onChange={(e) => setContactPerson(e.target.value)}
+                placeholder="Full Name"
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Phone / Mobile
+              </label>
+              <input
+                type="text"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="+91 98XXXXXXXX"
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Email
+              </label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="accounts@vendor.com"
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Bank Account No
+              </label>
+              <input
+                type="text"
+                value={bankAccount}
+                onChange={(e) => setBankAccount(e.target.value)}
+                placeholder="Account Number"
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono font-semibold text-slate-900"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                IFSC Code
+              </label>
+              <input
+                type="text"
+                maxLength={11}
+                value={ifscCode}
+                onChange={(e) => setIfscCode(e.target.value.toUpperCase())}
+                placeholder="HDFC0001234"
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono font-bold text-slate-900 uppercase"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Address / City
+              </label>
+              <input
+                type="text"
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                placeholder="Patna / Kolkata / Lucknow"
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900"
+              />
+            </div>
+
+            <div className="lg:col-span-4 flex justify-end pt-1">
+              <button
+                type="submit"
+                disabled={saving}
+                className="inline-flex items-center justify-center gap-2 px-6 py-2.5 bg-blue-800 hover:bg-blue-900 text-white font-bold text-xs rounded-xl shadow cursor-pointer"
+              >
+                <Building2 className="w-4 h-4" />
+                {saving ? 'Saving Vendor...' : 'Save Vendor to Master'}
               </button>
             </div>
+          </form>
+        </div>
 
-            <form onSubmit={handleCreateVendor} className="p-6 space-y-4 text-xs">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-slate-600 mb-1">Vendor / Person Name *</label>
-                  <input
-                    type="text"
-                    required
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g. Ramesh Kumar"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"
-                  />
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-600 mb-1">Company Name</label>
-                  <input
-                    type="text"
-                    value={companyName}
-                    onChange={(e) => setCompanyName(e.target.value)}
-                    placeholder="e.g. Kumar TMT Traders"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"
-                  />
-                </div>
-              </div>
+        {/* Vendor Directory Table */}
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
+          <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+            <h3 className="text-sm font-extrabold text-slate-900">
+              Registered Vendors ({filteredVendors.length})
+            </h3>
+            {loading && <span className="text-xs text-slate-500">Loading...</span>}
+          </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-slate-600 mb-1">Category *</label>
-                  <select
-                    value={category}
-                    onChange={(e) => setCategory(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold"
-                  >
-                    <option value="Material Supplier">Material Supplier</option>
-                    <option value="Civil Contractor">Civil Contractor</option>
-                    <option value="Electrical & Plumbing">Electrical & Plumbing</option>
-                    <option value="Equipment Rental">Equipment Rental</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-600 mb-1">Phone Number</label>
-                  <input
-                    type="text"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="10-digit mobile"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-slate-600 mb-1">GST Number (GSTIN)</label>
-                  <input
-                    type="text"
-                    value={gstNo}
-                    onChange={(e) => setGstNo(e.target.value)}
-                    placeholder="e.g. 10AAAAA0000A1Z5"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 uppercase font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-600 mb-1">Opening Balance (₹)</label>
-                  <input
-                    type="number"
-                    value={openingBalance}
-                    onChange={(e) => setOpeningBalance(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-600 mb-1">Complete Address</label>
-                <textarea
-                  rows={2}
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  placeholder="Street, City, State, Pincode..."
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"
-                />
-              </div>
-
-              <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
-                <button type="button" onClick={() => setShowVendorModal(false)} className="px-4 py-2 border rounded-xl font-semibold">Cancel</button>
-                <button type="submit" className="px-5 py-2 bg-pink-600 text-white rounded-xl font-bold">Save Vendor</button>
-              </div>
-            </form>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider border-b border-slate-200">
+                  <th className="py-3.5 px-4">Code &amp; Name</th>
+                  <th className="py-3.5 px-4">Category</th>
+                  <th className="py-3.5 px-4">GSTIN / PAN</th>
+                  <th className="py-3.5 px-4">Contact &amp; Bank</th>
+                  <th className="py-3.5 px-4">Status</th>
+                  <th className="py-3.5 px-4 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredVendors.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-10 text-center text-slate-500">
+                      No vendors found.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredVendors.map((v) => (
+                    <tr key={v.id} className="hover:bg-slate-50/80">
+                      <td className="py-3.5 px-4">
+                        <div className="font-mono font-bold text-blue-700">{v.vendor_code}</div>
+                        <div className="font-bold text-slate-900">{v.vendor_name}</div>
+                      </td>
+                      <td className="py-3.5 px-4 font-semibold text-slate-700">{v.category}</td>
+                      <td className="py-3.5 px-4 font-mono text-[11px]">
+                        <div>GST: {v.gstin || '-'}</div>
+                        <div className="text-slate-500">PAN: {v.pan || '-'}</div>
+                      </td>
+                      <td className="py-3.5 px-4 text-[11px]">
+                        <div className="font-semibold text-slate-800">
+                          {v.contact_person || '-'} {v.phone ? `• ${v.phone}` : ''}
+                        </div>
+                        <div className="text-slate-500 font-mono">
+                          {v.bank_account ? `A/C: ${v.bank_account}` : ''} {v.ifsc_code ? `(${v.ifsc_code})` : ''}
+                        </div>
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <span
+                          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold border ${
+                            v.status === 'Active'
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : 'bg-slate-100 text-slate-600 border-slate-200'
+                          }`}
+                        >
+                          {v.status === 'Active' ? (
+                            <CheckCircle2 className="w-3 h-3" />
+                          ) : (
+                            <XCircle className="w-3 h-3" />
+                          )}
+                          {v.status}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 text-right">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleStatus(v)}
+                          className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-[11px] cursor-pointer"
+                        >
+                          {v.status === 'Active' ? 'Mark Inactive' : 'Activate'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
-      )}
-
-      {/* Add Transaction Modal */}
-      {showTxnModal && selectedVendor && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl overflow-hidden">
-            <div className="bg-slate-900 px-6 py-4 flex justify-between items-center text-white">
-              <h3 className="font-bold text-sm">Add Ledger Entry for {selectedVendor.name}</h3>
-              <button onClick={() => setShowTxnModal(false)} className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-lg">
-                <X size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleAddTxn} className="p-6 space-y-4 text-xs">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-slate-600 mb-1">Transaction Type *</label>
-                  <select
-                    value={txnType}
-                    onChange={(e) => {
-                      setTxnType(e.target.value);
-                      if (e.target.value === "Payment Made") setIsDebit(true);
-                      else setIsDebit(false);
-                    }}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold"
-                  >
-                    <option value="Bill / Invoice">Bill / Invoice (Credit Due)</option>
-                    <option value="Payment Made">Payment Made (Debit Paid)</option>
-                    <option value="Debit Note">Debit Note</option>
-                    <option value="Credit Note">Credit Note</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-600 mb-1">Reference No / Bill No</label>
-                  <input
-                    type="text"
-                    value={refNo}
-                    onChange={(e) => setRefNo(e.target.value)}
-                    placeholder="e.g. INV-1092"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-600 mb-1">Amount (₹) *</label>
-                <input
-                  type="number"
-                  required
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  placeholder="Enter amount"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold text-pink-600 text-sm"
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-600 mb-1">Description / Notes</label>
-                <textarea
-                  rows={2}
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Details of materials supplied or payment mode..."
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"
-                />
-              </div>
-
-              <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
-                <button type="button" onClick={() => setShowTxnModal(false)} className="px-4 py-2 border rounded-xl font-semibold">Cancel</button>
-                <button type="submit" className="px-5 py-2 bg-pink-600 text-white rounded-xl font-bold">Record Entry</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      </div>
     </div>
   );
 }
