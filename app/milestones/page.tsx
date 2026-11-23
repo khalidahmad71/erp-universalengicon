@@ -1,157 +1,239 @@
 'use client';
 
-import React, { useState } from 'react';
-import Link from 'next/link';
+import React, { useCallback, useEffect, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://jvorxidiigvdznnpgxrj.supabase.co';
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-let supabase: any = null;
-try { if (supabaseUrl && supabaseKey) { supabase = createClient(supabaseUrl, supabaseKey); } } catch (e) {}
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
-const initialMilestones = [
-  { id: 1, milestone_name: 'Site Excavation & Earthwork (Tower A & B)', target_completion_date: '2026-06-30', completion_percentage: 100, milestone_status: 'Completed', responsible_engineer: 'Er. Rakesh Ranjan' },
-  { id: 2, milestone_name: 'Raft Foundation & PCC Casting', target_completion_date: '2026-08-15', completion_percentage: 100, milestone_status: 'Completed', responsible_engineer: 'Er. Rakesh Ranjan' },
-  { id: 3, milestone_name: 'Superstructure Columns & Slabs up to 4th Floor', target_completion_date: '2026-12-31', completion_percentage: 75, milestone_status: 'In Progress', responsible_engineer: 'Er. Rakesh Ranjan' },
-  { id: 4, milestone_name: 'Brick Masonry & Internal Partition Walls', target_completion_date: '2027-04-30', completion_percentage: 20, milestone_status: 'In Progress', responsible_engineer: 'Er. Amit Kumar' }
-];
+interface MilestoneItem {
+  id: string;
+  milestone_name: string;
+  responsible_engineer: string;
+  target_completion_date: string;
+  completion_percentage: number;
+  milestone_status: string;
+}
 
 export default function MilestonesModule() {
-  const [milestones, setMilestones] = useState(initialMilestones);
-  const [msName, setMsName] = useState('Electrical Conduit & Plumbing Rough-in');
-  const [targetDate, setTargetDate] = useState('2027-07-31');
-  const [pct, setPct] = useState<number>(0);
-  const [status, setStatus] = useState('Not Started');
-  const [engineer, setEngineer] = useState('Er. Amit Kumar');
-  const [isSaving, setIsSaving] = useState(false);
-  const [successMsg, setSuccessMsg] = useState('');
+  const [milestones, setMilestones] = useState<MilestoneItem[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const handleAddMilestone = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSaving(true);
-    const newEntry = {
-      id: milestones.length + 1,
-      milestone_name: msName,
-      target_completion_date: targetDate,
-      completion_percentage: pct,
-      milestone_status: status,
-      responsible_engineer: engineer
-    };
+  // Progress update state
+  const [editingMilestone, setEditingMilestone] = useState<MilestoneItem | null>(null);
+  const [progressInput, setProgressInput] = useState<number>(0);
+  const [savingProgress, setSavingProgress] = useState<boolean>(false);
 
-    try {
-      if (supabase) {
-        await supabase.from('project_milestones').insert([newEntry]);
-      }
-      setMilestones([...milestones, newEntry]);
-      setSuccessMsg('Project milestone added successfully!');
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsSaving(false);
+  const fetchMilestones = useCallback(async () => {
+    setLoading(true);
+    setErrorMsg(null);
+
+    const { data, error } = await supabase
+      .from('milestones')
+      .select('*')
+      .order('target_completion_date', { ascending: true });
+
+    if (error) {
+      setErrorMsg(error.message);
+    } else {
+      setMilestones((data as MilestoneItem[]) || []);
     }
+
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    fetchMilestones();
+  }, [fetchMilestones]);
+
+  const openProgressEditor = (m: MilestoneItem) => {
+    setEditingMilestone(m);
+    setProgressInput(Number(m.completion_percentage ?? 0));
+  };
+
+  const handleSaveMilestoneProgress = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingMilestone) return;
+
+    const clampedProgress = Math.max(0, Math.min(100, Number(progressInput)));
+    const nextStatus =
+      clampedProgress === 100
+        ? 'Completed'
+        : clampedProgress > 0
+        ? 'In Progress'
+        : 'Pending';
+
+    setSavingProgress(true);
+    setErrorMsg(null);
+
+    const { error } = await supabase
+      .from('milestones')
+      .update({
+        completion_percentage: clampedProgress,
+        milestone_status: nextStatus,
+      })
+      .eq('id', editingMilestone.id);
+
+    setSavingProgress(false);
+
+    if (error) {
+      setErrorMsg(`Update failed: ${error.message}`);
+      return;
+    }
+
+    setEditingMilestone(null);
+    await fetchMilestones();
   };
 
   return (
-    <div className="p-8 pb-20">
-      
-      {/* Top Header */}
-      <div className="max-w-6xl mx-auto mb-6 flex justify-between items-center bg-slate-900 text-white px-6 py-4 rounded-xl shadow-md">
+    <div className="p-6 bg-slate-50 min-h-screen space-y-5">
+      <div className="flex items-center justify-between bg-white p-4 rounded-lg border border-slate-200 shadow-2xs">
         <div>
-          <span className="text-xs uppercase tracking-widest text-blue-400 font-bold">Universal Engicon ERP</span>
-          <h2 className="text-xl font-bold">Project Milestones & Timeline Tracking</h2>
+          <h1 className="text-lg font-bold text-slate-900">Project Milestones</h1>
+          <p className="text-xs text-slate-500">
+            Track construction progress and update completion percentages
+          </p>
         </div>
-        <Link href="/" className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold py-2 px-4 rounded border border-slate-700 transition">
-          ← Dashboard
-        </Link>
+        <button
+          type="button"
+          onClick={fetchMilestones}
+          className="px-3 py-1.5 text-xs font-semibold rounded border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 transition-colors"
+        >
+          Refresh
+        </button>
       </div>
 
-      {successMsg && (
-        <div className="max-w-6xl mx-auto mb-6 bg-emerald-50 border border-emerald-300 text-emerald-900 p-4 rounded-xl font-bold text-center">
-          ✓ {successMsg}
+      {errorMsg && (
+        <div className="p-3 text-xs font-medium rounded border border-red-200 bg-red-50 text-red-700">
+          {errorMsg}
         </div>
       )}
 
-      {/* Form & Table Container */}
-      <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
-        {/* Add Milestone Form */}
-        <div className="bg-white p-6 rounded-2xl shadow-xl border border-slate-200 h-fit">
-          <h3 className="text-lg font-black text-slate-900 mb-4 pb-2 border-b">Add New Project Milestone</h3>
-          <form onSubmit={handleAddMilestone} className="space-y-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Milestone Name / Scope</label>
-              <input type="text" className="w-full p-3 border rounded-lg font-bold bg-slate-50" value={msName} onChange={(e) => setMsName(e.target.value)} required />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Target Completion Date</label>
-              <input type="date" className="w-full p-3 border rounded-lg font-bold text-xs" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} required />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Progress (%)</label>
-                <input type="number" min="0" max="100" className="w-full p-3 border rounded-lg font-bold text-blue-900" value={pct} onChange={(e) => setPct(Number(e.target.value))} required />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Status</label>
-                <select className="w-full p-3 border rounded-lg font-bold text-xs bg-white" value={status} onChange={(e) => setStatus(e.target.value)}>
-                  <option value="Not Started">Not Started</option>
-                  <option value="In Progress">In Progress</option>
-                  <option value="Completed">Completed</option>
-                  <option value="Delayed">Delayed</option>
-                </select>
-              </div>
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Responsible Engineer</label>
-              <input type="text" className="w-full p-3 border rounded-lg font-bold bg-slate-50" value={engineer} onChange={(e) => setEngineer(e.target.value)} required />
-            </div>
-            <button type="submit" disabled={isSaving} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-3.5 rounded-xl shadow transition uppercase tracking-wider text-sm">
-              {isSaving ? 'Saving...' : '+ Add Project Milestone'}
-            </button>
-          </form>
-        </div>
-
-        {/* Master Table */}
-        <div className="lg:col-span-2 bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
-          <div className="bg-slate-900 text-white p-4 font-bold text-sm uppercase tracking-wider">
-            Godrej Zen Estate Phase-2 — Master Project Timeline & Milestones
+      {editingMilestone && (
+        <form
+          onSubmit={handleSaveMilestoneProgress}
+          className="bg-white p-4 rounded-lg border border-blue-200 shadow-2xs flex flex-wrap items-end gap-4"
+        >
+          <div className="flex-1 min-w-[220px]">
+            <p className="text-xs text-slate-500">Updating Milestone</p>
+            <p className="text-sm font-bold text-slate-900">
+              {editingMilestone.milestone_name}
+            </p>
           </div>
-          <table className="w-full text-left border-collapse text-sm">
-            <thead className="bg-slate-100 text-slate-700 border-b">
+
+          <div className="w-36">
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              Completion (%)
+            </label>
+            <input
+              type="number"
+              min={0}
+              max={100}
+              value={progressInput}
+              onChange={(e) => setProgressInput(Number(e.target.value))}
+              className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded focus:outline-none focus:border-blue-600"
+              required
+            />
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="submit"
+              disabled={savingProgress}
+              className="px-4 py-1.5 text-xs font-semibold rounded bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white transition-colors"
+            >
+              {savingProgress ? 'Saving...' : 'Save Progress'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditingMilestone(null)}
+              className="px-3 py-1.5 text-xs font-semibold rounded border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+
+      <div className="bg-white rounded-lg border border-slate-200 overflow-x-auto shadow-2xs">
+        <table className="w-full text-left border-collapse">
+          <thead>
+            <tr className="border-b bg-slate-50 text-[11px] font-semibold uppercase text-slate-500">
+              <th className="py-3 px-4">Milestone</th>
+              <th className="py-3 px-4 text-center">Target Date</th>
+              <th className="py-3 px-4 text-center">Progress</th>
+              <th className="py-3 px-4 text-center">Status</th>
+              <th className="py-3 px-4 text-right">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
               <tr>
-                <th className="py-3 px-4">Milestone Scope & In-Charge</th>
-                <th className="py-3 px-4 text-center">Target Date</th>
-                <th className="py-3 px-4 text-center">Progress</th>
-                <th className="py-3 px-4 text-center">Status</th>
+                <td colSpan={5} className="py-6 px-4 text-center text-xs text-slate-500">
+                  Loading milestones...
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {milestones.map((m) => (
+            ) : milestones.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="py-6 px-4 text-center text-xs text-slate-500">
+                  No milestones found.
+                </td>
+              </tr>
+            ) : (
+              milestones.map((m) => (
                 <tr key={m.id} className="border-b hover:bg-slate-50">
                   <td className="py-3 px-4">
-                    <span className="font-bold text-slate-900 block">{m.milestone_name}</span>
-                    <span className="text-[11px] text-slate-500 font-medium">Engineer: {m.responsible_engineer}</span>
+                    <span className="font-bold text-slate-900 block">
+                      {m.milestone_name}
+                    </span>
+                    <span className="text-[11px] text-slate-500 font-medium">
+                      Engineer: {m.responsible_engineer}
+                    </span>
                   </td>
-                  <td className="py-3 px-4 text-center font-mono text-xs font-semibold text-slate-700">{m.target_completion_date}</td>
+                  <td className="py-3 px-4 text-center font-mono text-xs font-semibold text-slate-700">
+                    {m.target_completion_date}
+                  </td>
                   <td className="py-3 px-4 text-center">
                     <div className="flex items-center gap-2 justify-center">
                       <div className="w-16 bg-slate-200 h-2 rounded-full overflow-hidden">
-                        <div className="bg-blue-600 h-full" style={{ width: `${m.completion_percentage}%` }}></div>
+                        <div
+                          className="bg-blue-600 h-full"
+                          style={{ width: `${m.completion_percentage}%` }}
+                        />
                       </div>
-                      <span className="text-xs font-bold text-slate-800">{m.completion_percentage}%</span>
+                      <span className="text-xs font-bold text-slate-800">
+                        {m.completion_percentage}%
+                      </span>
                     </div>
                   </td>
                   <td className="py-3 px-4 text-center">
-                    <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${m.completion_percentage === 100 ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}`}>
+                    <span
+                      className={`text-xs font-bold px-2.5 py-1 rounded-full ${
+                        m.completion_percentage === 100
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-blue-100 text-blue-800'
+                      }`}
+                    >
                       {m.milestone_status}
                     </span>
                   </td>
+                  <td className="py-3 px-4 text-right">
+                    <button
+                      type="button"
+                      onClick={() => openProgressEditor(m)}
+                      className="px-3 py-1 text-xs font-semibold rounded border border-slate-300 bg-white hover:bg-slate-100 text-slate-800 transition-colors"
+                    >
+                      Update %
+                    </button>
+                  </td>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
+              ))
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );

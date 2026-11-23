@@ -1,4 +1,3 @@
-@'
 'use client';
 
 import React, { useEffect, useMemo, useState, Suspense } from 'react';
@@ -27,6 +26,7 @@ const supabase = createClient(
 
 interface RealEstateUnit {
   id: string;
+  project_id?: string | null;
   project_name: string;
   floor_no: string;
   unit_number: string;
@@ -38,6 +38,7 @@ interface RealEstateUnit {
   customer_phone?: string | null;
   booking_date?: string | null;
   amount_received?: number;
+  balance_amount?: number;
 }
 
 interface CustomerReceipt {
@@ -198,7 +199,7 @@ function RealEstateSalesContent() {
     setActiveUnit(unit);
     setCustomerName(unit.customer_name || '');
     setCustomerPhone(unit.customer_phone || '');
-    setAmountReceived(unit.amount_received ? String(unit.amount_received) : '');
+    setAmountReceived('');
     setBookingDate(unit.booking_date || new Date().toISOString().split('T')[0]);
   };
 
@@ -215,32 +216,38 @@ function RealEstateSalesContent() {
         customer_name: customerName.trim(),
         customer_phone: customerPhone.trim(),
         booking_date: bookingDate,
-        amount_received: paidAmt,
       })
       .eq('id', activeUnit.id);
 
-    if (!error && activeUnit.status === 'Available' && paidAmt > 0) {
-      const recNo = `UE-REC-${Math.floor(100000 + Math.random() * 900000)}`;
-      await supabase.from('customer_receipts').insert([
-        {
-          receipt_no: recNo,
-          project_name: activeUnit.project_name,
-          unit_number: activeUnit.unit_number,
-          customer_name: customerName.trim(),
-          payment_mode: 'Booking Advance',
-          amount_received: paidAmt,
-          receipt_date: bookingDate,
-        },
-      ]);
+    if (error) {
+      setSavingBooking(false);
+      alert('Booking error: ' + error.message);
+      return;
+    }
+
+    if (paidAmt > 0) {
+      const { data: authData } = await supabase.auth.getUser();
+      const { error: rpcError } = await supabase.rpc('post_customer_payment', {
+        p_project_id: activeUnit.project_id ?? null,
+        p_unit_id: activeUnit.id,
+        p_customer_name: customerName.trim(),
+        p_amount: paidAmt,
+        p_payment_mode: 'Booking Advance',
+        p_reference_no: null,
+        p_payment_date: bookingDate,
+        p_user_id: authData?.user?.id ?? null,
+      });
+
+      if (rpcError) {
+        setSavingBooking(false);
+        alert('Payment posting error: ' + rpcError.message);
+        return;
+      }
     }
 
     setSavingBooking(false);
-    if (error) {
-      alert('Booking error: ' + error.message);
-    } else {
-      setActiveUnit(null);
-      fetchAllData();
-    }
+    setActiveUnit(null);
+    await fetchAllData();
   };
 
   const handleCancelBooking = async () => {
@@ -255,17 +262,19 @@ function RealEstateSalesContent() {
         customer_phone: null,
         booking_date: null,
         amount_received: 0,
+        balance_amount: Number(activeUnit.total_price || 0),
       })
       .eq('id', activeUnit.id);
 
     setActiveUnit(null);
-    fetchAllData();
+    await fetchAllData();
   };
 
   const handleAddNewProjectOrUnit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSavingNewUnit(true);
 
+    const unitPrice = Number(newPrice || 0);
     const { error } = await supabase.from('real_estate_units').insert([
       {
         project_name: newProject.trim(),
@@ -273,9 +282,10 @@ function RealEstateSalesContent() {
         unit_number: newUnitNo.trim(),
         unit_type: newUnitType,
         area_sqft: Number(newArea || 0),
-        total_price: Number(newPrice || 0),
+        total_price: unitPrice,
         status: 'Available',
         amount_received: 0,
+        balance_amount: unitPrice,
       },
     ]);
 
@@ -294,44 +304,37 @@ function RealEstateSalesContent() {
     e.preventDefault();
     const amt = Number(recAmount || 0);
     if (amt <= 0) return;
+
+    const matchedUnit = projectUnits.find((u) => u.unit_number === recUnitNo);
+    if (!matchedUnit) {
+      alert('Please select a valid unit for this project.');
+      return;
+    }
+
     setSavingReceipt(true);
 
-    const recNo = `UE-REC-${Math.floor(100000 + Math.random() * 900000)}`;
-    const { error } = await supabase.from('customer_receipts').insert([
-      {
-        receipt_no: recNo,
-        project_name: selectedProject,
-        unit_number: recUnitNo,
-        customer_name: recCustomerName.trim(),
-        payment_mode: recPaymentMode,
-        transaction_ref: recRefNo.trim(),
-        amount_received: amt,
-        receipt_date: recDate,
-      },
-    ]);
+    const { data: authData } = await supabase.auth.getUser();
+    const { error } = await supabase.rpc('post_customer_payment', {
+      p_project_id: matchedUnit.project_id ?? null,
+      p_unit_id: matchedUnit.id,
+      p_customer_name: (matchedUnit.customer_name || recCustomerName).trim(),
+      p_amount: amt,
+      p_payment_mode: recPaymentMode,
+      p_reference_no: recRefNo.trim() || null,
+      p_payment_date: recDate,
+      p_user_id: authData?.user?.id ?? null,
+    });
+
+    setSavingReceipt(false);
 
     if (error) {
-      setSavingReceipt(false);
       alert('Receipt Error: ' + error.message);
       return;
     }
 
-    const matchedUnit = projectUnits.find((u) => u.unit_number === recUnitNo);
-    if (matchedUnit) {
-      await supabase
-        .from('real_estate_units')
-        .update({
-          status: 'Booked',
-          customer_name: matchedUnit.customer_name || recCustomerName.trim(),
-          amount_received: Number(matchedUnit.amount_received || 0) + amt,
-        })
-        .eq('id', matchedUnit.id);
-    }
-
-    setSavingReceipt(false);
     setRecAmount('');
     setRecRefNo('');
-    fetchAllData();
+    await fetchAllData();
   };
 
   const formatINR = (val: number) =>
@@ -686,7 +689,7 @@ function RealEstateSalesContent() {
                   </label>
                   <select
                     value={newUnitType}
-                    onChange={(e) => setNewUnitType(e.target.value as any)}
+                    onChange={(e) => setNewUnitType(e.target.value as 'Flat' | 'Shop' | 'Office')}
                     className="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-900 focus:bg-white focus:border-blue-700 focus:outline-none"
                   >
                     <option value="Flat">Flat (Residential)</option>
@@ -1005,4 +1008,3 @@ export default function RealEstateSalesPage() {
     </Suspense>
   );
 }
-'@ | Set-Content -Path "app\sales\page.tsx" -Encoding UTF8
