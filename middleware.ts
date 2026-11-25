@@ -1,23 +1,30 @@
-﻿import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
+﻿// middleware.ts
+import { NextResponse, type NextRequest } from 'next/server';
+import { canAccessRoute } from '@/lib/rbac';
+
+const PUBLIC_PATHS = ['/login', '/unauthorized', '/api/health'];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Public routes (Corporate website & Login page)
-  if (
-    pathname === '/' ||
-    pathname.startsWith('/login') ||
-    pathname.startsWith('/_next') ||
-    pathname.startsWith('/api') ||
-    pathname.includes('.')
-  ) {
+  if (PUBLIC_PATHS.some((path) => pathname.startsWith(path))) {
     return NextResponse.next();
+  }
+
+  // Agar aap role cookie mein store karte hain (jaise `erp_role`), toh yahan se padh sakte hain:
+  const role = request.cookies.get('erp_role')?.value ?? null;
+
+  if (!canAccessRoute(pathname, role)) {
+    const unauthorizedUrl = request.nextUrl.clone();
+    unauthorizedUrl.pathname = '/unauthorized';
+    return NextResponse.redirect(unauthorizedUrl);
   }
 
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+  matcher: [
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+  ],
 };
