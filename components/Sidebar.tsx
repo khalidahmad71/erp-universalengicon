@@ -12,6 +12,7 @@ import {
   Warehouse,
   HardHat,
   Building2,
+  Building,
   Landmark,
   ShieldCheck,
   History,
@@ -81,6 +82,11 @@ const NAV_ITEMS: NavItem[] = [
       { label: 'Unit Matrix & Receipts', href: '/sales' },
       { label: 'CLP Milestones', href: '/milestones' },
     ],
+  },
+  {
+    label: 'Bank & Treasury',
+    href: '/bank',
+    icon: <Building className="w-4 h-4" />,
   },
   {
     label: 'Finance & GST Ledger',
