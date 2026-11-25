@@ -1,224 +1,191 @@
 'use client';
 
-import React, { useEffect, useState, Suspense } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { usePathname, useSearchParams } from 'next/navigation';
-import { createClient } from '@supabase/supabase-js';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard,
-  Building2,
   FileSpreadsheet,
-  ClipboardList,
+  ClipboardCheck,
   ShoppingCart,
-  Contact2,
-  Package,
-  FileCheck2,
-  Receipt,
-  IndianRupee,
-  Home,
-  Truck,
-  Users,
-  LogOut,
+  PackageCheck,
+  Warehouse,
+  HardHat,
+  Building2,
+  Landmark,
   ShieldCheck,
-  Menu,
-  X,
+  History,
+  Users,
+  Truck,
   ChevronDown,
   ChevronRight,
-  Layers,
-  PlusCircle,
+  LogOut,
+  UserCheck,
 } from 'lucide-react';
+import { canAccessRoute, type ErpRole } from '@/lib/rbac';
+import { clearErpRoleSession, getClientErpRole } from '@/lib/erp-session';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
-
-const ROLE_PERMISSIONS: Record<string, string[]> = {
-  admin: ['*'],
-  md: ['*'],
-  'managing director': ['*'],
-  accountant: ['/dashboard', '/finance', '/po', '/purchase-orders', '/vendors', '/ra', '/real-estate', '/sales'],
-  'accounts manager': ['/dashboard', '/finance', '/po', '/purchase-orders', '/vendors', '/ra', '/real-estate', '/sales'],
-  site_engineer: ['/dashboard', '/projects', '/boq', '/mr', '/dpr', '/inventory', '/store', '/machinery'],
-  'site engineer': ['/dashboard', '/projects', '/boq', '/mr', '/dpr', '/inventory', '/store', '/machinery'],
-  store_manager: ['/dashboard', '/inventory', '/store', '/mr', '/po', '/purchase-orders', '/vendors'],
-  'store keeper': ['/dashboard', '/inventory', '/store', '/mr', '/po', '/purchase-orders', '/vendors'],
-  'sales manager': ['/dashboard', '/sales', '/real-estate'],
-};
-
-export function canAccessRoute(userRole: string | undefined, routePath: string): boolean {
-  const role = (userRole || 'admin').toLowerCase();
-  const allowedRoutes = ROLE_PERMISSIONS[role] || ['*'];
-  if (allowedRoutes.includes('*')) return true;
-  return allowedRoutes.some((allowed) => routePath === allowed || routePath.startsWith(allowed + '/'));
+interface NavItem {
+  label: string;
+  href: string;
+  icon: React.ReactNode;
+  children?: { label: string; href: string }[];
 }
 
-const MENU_ITEMS = [
-  { label: 'MD Approval Center', href: '/approvals', icon: ShieldCheck },
-  { label: 'Executive Dashboard', href: '/dashboard', icon: LayoutDashboard },
-  { label: 'Projects & Sites', href: '/projects', icon: Building2 },
-  { label: 'BOQ & Estimation', href: '/boq', icon: FileSpreadsheet },
-  { label: 'Material Requests (MR)', href: '/mr', icon: ClipboardList },
-  { label: 'Purchase Orders (PO)', href: '/po', icon: ShoppingCart },
-  { label: 'Vendor Master', href: '/vendors', icon: Contact2 },
-  { label: 'Store & Inventory (GRN)', href: '/store', icon: Package },
-  { label: 'Daily Progress (DPR)', href: '/dpr', icon: FileCheck2 },
-  { label: 'Contractor RA Bills', href: '/ra', icon: Receipt },
-  { label: 'Finance & Master Ledger', href: '/finance', icon: IndianRupee },
+const NAV_ITEMS: NavItem[] = [
+  {
+    label: 'Command Center',
+    href: '/',
+    icon: <LayoutDashboard className="w-4 h-4" />,
+  },
+  {
+    label: 'MD Approval Center',
+    href: '/md-approvals',
+    icon: <ShieldCheck className="w-4 h-4" />,
+  },
+  {
+    label: 'BOQ & Estimates',
+    href: '/boq',
+    icon: <FileSpreadsheet className="w-4 h-4" />,
+  },
+  {
+    label: 'Daily Progress (DPR)',
+    href: '/dpr',
+    icon: <ClipboardCheck className="w-4 h-4" />,
+  },
+  {
+    label: 'Purchase Orders (PO)',
+    href: '/po',
+    icon: <ShoppingCart className="w-4 h-4" />,
+  },
+  {
+    label: 'Central Store & GRN',
+    href: '/grn',
+    icon: <PackageCheck className="w-4 h-4" />,
+  },
+  {
+    label: 'Inventory Stock',
+    href: '/inventory',
+    icon: <Warehouse className="w-4 h-4" />,
+  },
+  {
+    label: 'Contractor RA Billing',
+    href: '/mb-bills',
+    icon: <HardHat className="w-4 h-4" />,
+  },
   {
     label: 'Real Estate Sales',
     href: '/sales',
-    icon: Home,
-    subItems: [
-      { label: 'Project Available & Booked', href: '/sales?view=inventory', viewKey: 'inventory', icon: Layers },
-      { label: 'Record New Project', href: '/sales?view=new', viewKey: 'new', icon: PlusCircle },
-      { label: 'Customer Payment Receipt', href: '/sales?view=receipts', viewKey: 'receipts', icon: Receipt },
+    icon: <Building2 className="w-4 h-4" />,
+    children: [
+      { label: 'Unit Matrix & Receipts', href: '/sales' },
+      { label: 'CLP Milestones', href: '/milestones' },
     ],
   },
-  { label: 'Plant & Machinery', href: '/machinery', icon: Truck },
-  { label: 'HR & Muster Roll', href: '/users', icon: Users },
+  {
+    label: 'Finance & GST Ledger',
+    href: '/finance',
+    icon: <Landmark className="w-4 h-4" />,
+  },
+  {
+    label: 'Plant & Machinery',
+    href: '/machinery',
+    icon: <Truck className="w-4 h-4" />,
+  },
+  {
+    label: 'HR & Payroll',
+    href: '/hr',
+    icon: <Users className="w-4 h-4" />,
+  },
+  {
+    label: 'System Audit Logs',
+    href: '/audit-logs',
+    icon: <History className="w-4 h-4" />,
+  },
 ];
 
-function SidebarContent() {
+export default function Sidebar() {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const currentView = searchParams.get('view') || 'inventory';
-
-  const [userRole, setUserRole] = useState<string>('admin');
-  const [userEmail, setUserEmail] = useState<string>('');
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const [realEstateOpen, setRealEstateOpen] = useState(true);
+  const router = useRouter();
+  const [role, setRole] = useState<ErpRole | null>(null);
+  const [salesOpen, setSalesOpen] = useState(true);
 
   useEffect(() => {
-    if (pathname === '/login' || pathname === '/') return;
-
-    const cookieMatch = document.cookie.match(/(?:^|;\s*)ue_role=([^;]*)/);
-    const sessionMatch = document.cookie.match(/(?:^|;\s*)ue_session=([^;]*)/);
-    if (cookieMatch) setUserRole(decodeURIComponent(cookieMatch[1]).toLowerCase());
-    if (sessionMatch) setUserEmail(decodeURIComponent(sessionMatch[1]));
-
-    const fetchUserRole = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        setUserEmail(user.email || '');
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('role')
-          .eq('id', user.id)
-          .single();
-        if (profile?.role) {
-          setUserRole(profile.role.toLowerCase());
-        }
-      }
-    };
-    fetchUserRole();
+    setRole(getClientErpRole());
   }, [pathname]);
 
-  if (pathname === '/login' || pathname === '/') {
-    return null;
-  }
-
-  const handleLogout = async () => {
-    document.cookie = 'ue_session=; path=/; max-age=0';
-    document.cookie = 'ue_role=; path=/; max-age=0';
-    document.cookie = 'ue_dept=; path=/; max-age=0';
-    document.cookie = 'sb-access-token=; path=/; max-age=0';
-    await supabase.auth.signOut();
-    window.location.href = '/login';
+  const handleLogout = () => {
+    clearErpRoleSession();
+    router.push('/login');
+    router.refresh();
   };
 
-  const visibleMenuItems = MENU_ITEMS.filter((item) => canAccessRoute(userRole, item.href));
+  const visibleItems = NAV_ITEMS.filter((item) =>
+    role ? canAccessRoute(role, item.href) : true
+  );
 
   return (
-    <>
-      <div className="lg:hidden flex items-center justify-between bg-white border-b border-slate-200 px-4 py-3 sticky top-0 z-40 shadow-sm print:hidden">
-        <div>
-          <span className="font-extrabold text-slate-900 tracking-tight text-base">UNIVERSAL ENGICON</span>
-          <span className="block text-[10px] font-semibold text-blue-700 uppercase">Enterprise ERP</span>
-        </div>
-        <button
-          onClick={() => setMobileOpen(!mobileOpen)}
-          className="p-2 rounded-lg bg-slate-100 text-slate-800 border border-slate-300 shadow-sm"
-        >
-          {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-        </button>
-      </div>
-
-      <aside
-        className={`fixed inset-y-0 left-0 z-50 w-68 bg-slate-50 border-r border-slate-200 flex flex-col transition-transform duration-200 ease-in-out lg:static lg:translate-x-0 print:hidden ${
-          mobileOpen ? 'translate-x-0' : '-translate-x-full'
-        }`}
-      >
-        <div className="p-5 bg-white border-b border-slate-200">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-lg bg-blue-800 text-white flex items-center justify-center font-black text-lg shadow">
-              UE
-            </div>
-            <div>
-              <h2 className="font-extrabold text-slate-900 text-sm leading-tight tracking-wide">
-                UNIVERSAL ENGICON
-              </h2>
-              <p className="text-[11px] font-semibold text-slate-500">PVT. LTD. • ERP SYSTEM</p>
-            </div>
+    <aside className="w-72 min-h-screen bg-slate-950 text-slate-100 border-r border-slate-800 flex flex-col justify-between select-none shadow-2xl">
+      <div>
+        <div className="p-5 border-b border-slate-800 bg-gradient-to-r from-slate-900 via-slate-900 to-amber-950/30">
+          <div className="text-[11px] font-bold tracking-widest text-amber-400 uppercase">
+            Enterprise ERP Portal
           </div>
-
-          <div className="mt-3 px-2.5 py-1.5 rounded-md bg-slate-100 border border-slate-200 flex items-center justify-between">
-            <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase text-blue-800">
-              <ShieldCheck className="w-3.5 h-3.5" />
-              {userRole.replace('_', ' ')}
-            </span>
-            <span className="text-[10px] text-slate-500 truncate max-w-[110px]" title={userEmail}>
-              {userEmail}
+          <div className="text-base font-extrabold text-white tracking-tight mt-0.5">
+            UNIVERSAL ENGICON PVT. LTD.
+          </div>
+          <div className="mt-3 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700/80 shadow-inner">
+            <UserCheck className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span className="text-xs font-semibold text-slate-200 truncate">
+              Role: {role ?? 'Not Authenticated'}
             </span>
           </div>
         </div>
 
-        <nav className="flex-1 overflow-y-auto p-3 space-y-1.5">
-          {visibleMenuItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
+        <nav className="p-3 space-y-1.5">
+          {visibleItems.map((item) => {
+            const isActive =
+              pathname === item.href ||
+              (item.children && item.children.some((c) => pathname === c.href));
 
-            if (item.subItems) {
+            if (item.children) {
               return (
-                <div key={item.href} className="space-y-1">
+                <div key={item.label} className="space-y-1">
                   <button
                     type="button"
-                    onClick={() => setRealEstateOpen(!realEstateOpen)}
-                    className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-lg text-sm font-semibold transition-all border cursor-pointer ${
+                    onClick={() => setSalesOpen((prev) => !prev)}
+                    className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-lg text-sm font-semibold border transition-all duration-150 shadow-md ${
                       isActive
-                        ? 'bg-blue-800 text-white border-blue-900 shadow-md'
-                        : 'bg-white text-slate-700 border-slate-200/90 shadow-sm hover:bg-blue-50 hover:text-blue-800'
+                        ? 'bg-amber-500 text-slate-950 border-amber-300 shadow-amber-500/20'
+                        : 'bg-slate-900/90 text-slate-200 border-slate-800 hover:bg-slate-800 hover:border-amber-500/50 hover:text-amber-300'
                     }`}
                   >
-                    <span className="flex items-center gap-3">
-                      <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-slate-500'}`} />
-                      <span className="truncate">{item.label}</span>
+                    <span className="flex items-center gap-2.5">
+                      {item.icon}
+                      {item.label}
                     </span>
-                    {realEstateOpen ? (
-                      <ChevronDown className="w-4 h-4 shrink-0" />
+                    {salesOpen ? (
+                      <ChevronDown className="w-4 h-4" />
                     ) : (
-                      <ChevronRight className="w-4 h-4 shrink-0" />
+                      <ChevronRight className="w-4 h-4" />
                     )}
                   </button>
 
-                  {realEstateOpen && (
-                    <div className="pl-4 pr-1 py-1 space-y-1 border-l-2 border-blue-200 ml-3">
-                      {item.subItems.map((sub) => {
-                        const SubIcon = sub.icon;
-                        const isSubActive = pathname === '/sales' && currentView === sub.viewKey;
+                  {salesOpen && (
+                    <div className="pl-5 space-y-1 border-l-2 border-slate-800 ml-3">
+                      {item.children.map((sub) => {
+                        const subActive = pathname === sub.href;
                         return (
                           <Link
                             key={sub.href}
                             href={sub.href}
-                            onClick={() => setMobileOpen(false)}
-                            className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-bold transition-all ${
-                              isSubActive
-                                ? 'bg-blue-100 text-blue-900 border border-blue-300 shadow-2xs'
-                                : 'text-slate-600 hover:bg-white hover:text-blue-800'
+                            className={`block px-3 py-2 rounded-md text-xs font-semibold border transition-all ${
+                              subActive
+                                ? 'bg-amber-500/20 text-amber-300 border-amber-500/50'
+                                : 'bg-slate-900/50 text-slate-300 border-transparent hover:bg-slate-800 hover:text-white'
                             }`}
                           >
-                            <SubIcon className={`w-3.5 h-3.5 shrink-0 ${isSubActive ? 'text-blue-800' : 'text-slate-400'}`} />
-                            <span className="truncate">{sub.label}</span>
+                            {sub.label}
                           </Link>
                         );
                       })}
@@ -232,38 +199,30 @@ function SidebarContent() {
               <Link
                 key={item.href}
                 href={item.href}
-                onClick={() => setMobileOpen(false)}
-                className={`flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm font-semibold transition-all border ${
+                className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-lg text-sm font-semibold border transition-all duration-150 shadow-md ${
                   isActive
-                    ? 'bg-blue-800 text-white border-blue-900 shadow-md translate-x-0.5'
-                    : 'bg-white text-slate-700 border-slate-200/90 shadow-sm hover:bg-blue-50 hover:text-blue-800 hover:border-blue-300'
+                    ? 'bg-amber-500 text-slate-950 border-amber-300 shadow-amber-500/20'
+                    : 'bg-slate-900/90 text-slate-200 border-slate-800 hover:bg-slate-800 hover:border-amber-500/50 hover:text-amber-300'
                 }`}
               >
-                <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-slate-500'}`} />
-                <span className="truncate">{item.label}</span>
+                {item.icon}
+                <span>{item.label}</span>
               </Link>
             );
           })}
         </nav>
+      </div>
 
-        <div className="p-3 bg-white border-t border-slate-200">
-          <button
-            onClick={handleLogout}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold text-rose-700 bg-rose-50 border border-rose-200 shadow-sm hover:bg-rose-600 hover:text-white transition-all cursor-pointer"
-          >
-            <LogOut className="w-4 h-4" />
-            Sign Out
-          </button>
-        </div>
-      </aside>
-    </>
-  );
-}
-
-export default function Sidebar() {
-  return (
-    <Suspense fallback={null}>
-      <SidebarContent />
-    </Suspense>
+      <div className="p-4 border-t border-slate-800 bg-slate-900/60">
+        <button
+          type="button"
+          onClick={handleLogout}
+          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-red-950/60 hover:bg-red-600 text-red-200 hover:text-white border border-red-800/70 font-bold text-xs uppercase tracking-wider shadow-md transition-all"
+        >
+          <LogOut className="w-4 h-4" />
+          Switch Role / Sign Out
+        </button>
+      </div>
+    </aside>
   );
 }

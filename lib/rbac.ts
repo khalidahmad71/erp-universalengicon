@@ -1,109 +1,68 @@
-// lib/rbac.ts
-
 export type ErpRole =
-  | 'admin'
-  | 'accountant'
-  | 'site_engineer'
-  | 'store_manager'
-  | 'purchase_officer'
-  | 'purchase_manager'
-  | 'vp_procurement';
+  | 'MD'
+  | 'ADMIN'
+  | 'ACCOUNTS'
+  | 'SALES'
+  | 'SITE_ENGINEER'
+  | 'VIEWER';
 
-export interface RoutePermissionRule {
-  prefix: string;
-  roles: ErpRole[];
-  label: string;
-}
+export const ERP_ROLE_COOKIE = 'erp_role';
 
-export const ROUTE_PERMISSIONS: RoutePermissionRule[] = [
-  {
-    prefix: '/users',
-    roles: ['admin'],
-    label: 'User & Role Management',
-  },
-  {
-    prefix: '/md-approvals',
-    roles: ['admin'],
-    label: 'MD Approval Center',
-  },
-  {
-    prefix: '/audit-logs',
-    roles: ['admin'],
-    label: 'Audit Logs',
-  },
-  {
-    prefix: '/finance',
-    roles: ['admin', 'accountant'],
-    label: 'Finance & Ledger',
-  },
-  {
-    prefix: '/sales',
-    roles: ['admin', 'accountant'],
-    label: 'Real Estate Sales',
-  },
-  {
-    prefix: '/milestones',
-    roles: ['admin', 'accountant'],
-    label: 'Payment Milestones',
-  },
-  {
-    prefix: '/vendors',
-    roles: ['admin', 'accountant', 'purchase_officer', 'purchase_manager', 'vp_procurement'],
-    label: 'Vendor Master',
-  },
-  {
-    prefix: '/po',
-    roles: ['admin', 'accountant', 'purchase_officer', 'purchase_manager', 'vp_procurement'],
-    label: 'Purchase Orders',
-  },
-  {
-    prefix: '/work-orders',
-    roles: ['admin', 'accountant', 'site_engineer', 'purchase_manager'],
-    label: 'Work Orders & Billing',
-  },
-  {
-    prefix: '/boq',
-    roles: ['admin', 'site_engineer', 'accountant'],
-    label: 'BOQ & RA Billing',
-  },
-  {
-    prefix: '/inventory',
-    roles: ['admin', 'store_manager', 'site_engineer'],
-    label: 'Inventory & GRN',
-  },
-  {
-    prefix: '/dpr',
-    roles: ['admin', 'site_engineer'],
-    label: 'Daily Progress & Plant',
-  },
+const VALID_ROLES: ErpRole[] = [
+  'MD',
+  'ADMIN',
+  'ACCOUNTS',
+  'SALES',
+  'SITE_ENGINEER',
+  'VIEWER',
 ];
 
-export function normalizeRole(role?: string | null): ErpRole | null {
-  if (!role) return null;
-  const cleaned = role.trim().toLowerCase();
-  const validRoles: ErpRole[] = [
-    'admin',
-    'accountant',
-    'site_engineer',
-    'store_manager',
-    'purchase_officer',
-    'purchase_manager',
-    'vp_procurement',
-  ];
-  return validRoles.includes(cleaned as ErpRole) ? (cleaned as ErpRole) : null;
+export function normalizeErpRole(rawRole?: string | null): ErpRole {
+  if (!rawRole) return 'VIEWER';
+  const upper = rawRole.trim().toUpperCase();
+  if (upper === 'MANAGING_DIRECTOR' || upper === 'DIRECTOR') return 'MD';
+  if (upper === 'ACCOUNTANT' || upper === 'FINANCE') return 'ACCOUNTS';
+  if (VALID_ROLES.includes(upper as ErpRole)) {
+    return upper as ErpRole;
+  }
+  return 'VIEWER';
 }
 
-export function canAccessRoute(pathname: string, role?: string | null): boolean {
-  const normalizedRole = normalizeRole(role);
-  if (!normalizedRole) return false;
+export function setErpRoleCookieClient(role: ErpRole): void {
+  if (typeof document === 'undefined') return;
+  const normalized = normalizeErpRole(role);
+  const maxAgeSeconds = 60 * 60 * 24 * 7;
+  const secureFlag = window.location.protocol === 'https:' ? '; Secure' : '';
+  document.cookie = `${ERP_ROLE_COOKIE}=${encodeURIComponent(normalized)}; Path=/; Max-Age=${maxAgeSeconds}; SameSite=Lax${secureFlag}`;
+}
 
-  const matchedRule = ROUTE_PERMISSIONS.find(
-    (item) => pathname === item.prefix || pathname.startsWith(`${item.prefix}/`)
-  );
+export function clearErpRoleCookieClient(): void {
+  if (typeof document === 'undefined') return;
+  document.cookie = `${ERP_ROLE_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`;
+}
 
-  if (!matchedRule) {
+export function canAccessRoute(role: ErpRole, pathname: string): boolean {
+  const normalized = normalizeErpRole(role);
+
+  if (normalized === 'MD' || normalized === 'ADMIN') {
     return true;
   }
 
-  return matchedRule.roles.includes(normalizedRole);
+  if (pathname.startsWith('/md-approvals') || pathname.startsWith('/audit-logs')) {
+    return false;
+  }
+
+  if (pathname.startsWith('/finance') || pathname.startsWith('/accounts')) {
+    return normalized === 'ACCOUNTS';
+  }
+
+  if (pathname.startsWith('/sales') || pathname.startsWith('/real-estate')) {
+    return (
+      normalized === 'SALES' ||
+      normalized === 'SITE_ENGINEER' ||
+      normalized === 'VIEWER'
+    );
+  }
+
+  return true;
 }
