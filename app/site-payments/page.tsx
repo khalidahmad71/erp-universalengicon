@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
-import { supabase } from "@/lib/supabaseClient";
+import { createClient, type AuthChangeEvent, type Session } from "@supabase/supabase-js";
 
 type PaymentCategory = "Labor" | "Staff" | "Vendor" | "Petty Cash";
 type PaymentMode = "UPI" | "Cash" | "NEFT" | "Cheque";
@@ -21,6 +21,14 @@ interface SitePaymentEntry {
 }
 
 const STORAGE_KEY = "ue_site_daily_payments_v1";
+
+function getSupabaseBrowserClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+  return createClient(url, anonKey);
+}
+
+const supabase = getSupabaseBrowserClient();
 
 function formatINR(num: number): string {
   return new Intl.NumberFormat("en-IN", {
@@ -98,17 +106,19 @@ export default function SitePaymentsMobilePage() {
 
     checkSession();
 
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!active) return;
-      if (!session) {
-        setIsAuthenticated(false);
-        setAuthChecking(false);
-        redirectToLogin();
-      } else {
-        setIsAuthenticated(true);
-        setAuthChecking(false);
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      (_event: AuthChangeEvent, session: Session | null) => {
+        if (!active) return;
+        if (!session) {
+          setIsAuthenticated(false);
+          setAuthChecking(false);
+          redirectToLogin();
+        } else {
+          setIsAuthenticated(true);
+          setAuthChecking(false);
+        }
       }
-    });
+    );
 
     return () => {
       active = false;
