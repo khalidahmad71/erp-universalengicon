@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type AuthChangeEvent, type Session } from "@supabase/supabase-js";
 import Sidebar from "./Sidebar";
 
 function getSupabaseClient() {
@@ -30,9 +30,11 @@ export default function SidebarWrapper({ children }: { children: React.ReactNode
       if (active) setHasSession(Boolean(data.session));
     });
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (active) setHasSession(Boolean(session));
-    });
+    const { data: sub } = supabase.auth.onAuthStateChange(
+      (_event: AuthChangeEvent, session: Session | null) => {
+        if (active) setHasSession(Boolean(session));
+      }
+    );
 
     return () => {
       active = false;

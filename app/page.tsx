@@ -93,17 +93,17 @@ export default function HomePage() {
           </p>
           <h1 className="text-xl font-bold mt-1">Enterprise ERP Dashboard</h1>
           <p className="text-xs text-slate-300 mt-1">
-            Authenticated session active. Select a module to continue.
+            Logged in. Open Site Daily Payments or select an ERP module.
           </p>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <Link
             href="/site-payments"
-            className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:border-[#0B1F3A] transition"
+            className="bg-[#0B1F3A] text-white border border-[#C59B27] rounded-xl p-4 shadow-sm hover:bg-[#143159] transition"
           >
-            <p className="text-xs font-bold text-[#C59B27] uppercase">Mobile Log</p>
-            <p className="text-sm font-extrabold text-[#0B1F3A] mt-1">Site Daily Payments</p>
+            <p className="text-xs font-bold text-[#E6C567] uppercase">Mobile Entry</p>
+            <p className="text-sm font-extrabold text-white mt-1">Site Daily Payments</p>
           </Link>
 
           <Link
