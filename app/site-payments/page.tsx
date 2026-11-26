@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
@@ -39,9 +38,12 @@ function getTodayISO(): string {
 }
 
 export default function SitePaymentsMobilePage() {
+  const [authChecking, setAuthChecking] = useState<boolean>(true);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+
   const [activeTab, setActiveTab] = useState<"entry" | "log">("entry");
   const [entries, setEntries] = useState<SitePaymentEntry[]>([]);
-  const [isLoaded, setIsLoaded] = useState(false);
+  const [isLoaded, setIsLoaded] = useState<boolean>(false);
 
   const [entryDate, setEntryDate] = useState<string>(getTodayISO());
   const [projectSite, setProjectSite] = useState<string>("");
@@ -52,7 +54,9 @@ export default function SitePaymentsMobilePage() {
   const [remarks, setRemarks] = useState<string>("");
 
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
-  const [toast, setToast] = useState<{ msg: string; type: "success" | "error" | "info" } | null>(null);
+  const [toast, setToast] = useState<{ msg: string; type: "success" | "error" | "info" } | null>(
+    null
+  );
   const [filterSite, setFilterSite] = useState<string>("ALL");
   const [showInstallGuide, setShowInstallGuide] = useState<boolean>(false);
 
@@ -62,6 +66,58 @@ export default function SitePaymentsMobilePage() {
   };
 
   useEffect(() => {
+    let active = true;
+
+    const redirectToLogin = () => {
+      if (typeof window !== "undefined") {
+        window.location.replace("/login?next=/site-payments");
+      }
+    };
+
+    const checkSession = async () => {
+      try {
+        const { data } = await supabase.auth.getSession();
+        if (!active) return;
+
+        if (!data.session) {
+          setIsAuthenticated(false);
+          setAuthChecking(false);
+          redirectToLogin();
+          return;
+        }
+
+        setIsAuthenticated(true);
+        setAuthChecking(false);
+      } catch {
+        if (!active) return;
+        setIsAuthenticated(false);
+        setAuthChecking(false);
+        redirectToLogin();
+      }
+    };
+
+    checkSession();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!active) return;
+      if (!session) {
+        setIsAuthenticated(false);
+        setAuthChecking(false);
+        redirectToLogin();
+      } else {
+        setIsAuthenticated(true);
+        setAuthChecking(false);
+      }
+    });
+
+    return () => {
+      active = false;
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
@@ -72,16 +128,16 @@ export default function SitePaymentsMobilePage() {
       console.error("Failed to read local site payments:", e);
     }
     setIsLoaded(true);
-  }, []);
+  }, [isAuthenticated]);
 
   useEffect(() => {
-    if (!isLoaded) return;
+    if (!isAuthenticated || !isLoaded) return;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
     } catch (e) {
       console.error("Failed to save local site payments:", e);
     }
-  }, [entries, isLoaded]);
+  }, [entries, isAuthenticated, isLoaded]);
 
   const savedSites = useMemo(() => {
     const unique = Array.from(new Set(entries.map((e) => e.project_site.trim()).filter(Boolean)));
@@ -192,6 +248,14 @@ export default function SitePaymentsMobilePage() {
 
     setIsSyncing(true);
     try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session) {
+        if (typeof window !== "undefined") {
+          window.location.replace("/login?next=/site-payments");
+        }
+        return;
+      }
+
       const payload = pendingSyncEntries.map((item) => ({
         client_ref: item.client_ref,
         entry_date: item.entry_date,
@@ -266,6 +330,21 @@ export default function SitePaymentsMobilePage() {
     link.click();
     document.body.removeChild(link);
   };
+
+  if (authChecking || !isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-[#F8F7F4] flex items-center justify-center p-4">
+        <div className="bg-white border border-slate-200 rounded-2xl px-6 py-5 text-center shadow-sm max-w-sm w-full">
+          <p className="text-xs font-bold uppercase tracking-wider text-[#0B1F3A]">
+            Universal Engicon Pvt. Ltd.
+          </p>
+          <p className="text-sm font-semibold text-slate-700 mt-1.5">
+            Redirecting to Sign In...
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#F8F7F4] text-slate-900 pb-28">
@@ -565,7 +644,8 @@ export default function SitePaymentsMobilePage() {
               <div className="bg-white rounded-2xl border border-dashed border-slate-300 p-8 text-center">
                 <p className="text-sm font-bold text-slate-700">No payments saved yet</p>
                 <p className="text-xs text-slate-500 mt-1">
-                  Switch to &quot;+ New Payment Entry&quot; to log daily labor, staff, or vendor payments.
+                  Switch to &quot;+ New Payment Entry&quot; to log daily labor, staff, or vendor
+                  payments.
                 </p>
               </div>
             ) : (
