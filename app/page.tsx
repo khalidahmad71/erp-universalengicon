@@ -100,10 +100,11 @@ export default function HomePage() {
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <Link
             href="/site-payments"
-            className="bg-[#0B1F3A] text-white border border-[#C59B27] rounded-xl p-4 shadow-sm hover:bg-[#143159] transition"
+            className="bg-[#0B1F3A] text-white border-2 border-[#C59B27] rounded-xl p-4 shadow-sm hover:bg-[#143159] transition"
           >
             <p className="text-xs font-bold text-[#E6C567] uppercase">Mobile Entry</p>
             <p className="text-sm font-extrabold text-white mt-1">Site Daily Payments</p>
+            <p className="text-[11px] text-slate-300 mt-1">Offline log &amp; ERP sync</p>
           </Link>
 
           <Link
