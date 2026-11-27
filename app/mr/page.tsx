@@ -14,44 +14,72 @@ import type { ErpRole } from '@/lib/rbac';
 
 interface ProjectOption {
   id: string | number;
-  name?: string;
-  project_name?: string;
-  site_name?: string;
-  title?: string;
+  name?: string | null;
+  project_name?: string | null;
+  site_name?: string | null;
+  title?: string | null;
 }
 
 interface MaterialRequestRow {
   id: string | number;
-  mr_no?: string;
-  project_name?: string;
-  project_site?: string;
-  site_name?: string;
-  material_name?: string;
-  quantity?: number;
-  unit?: string;
-  needed_by?: string;
-  status?: string;
-  remarks?: string;
-  created_at?: string;
+  mr_no?: string | null;
+  mr_number?: string | null;
+  project_id?: string | number | null;
+  project_name?: string | null;
+  project_site?: string | null;
+  site_name?: string | null;
+  project?: string | { name?: string | null; title?: string | null } | null;
+  projects?: { name?: string | null; title?: string | null; site_name?: string | null } | null;
+  material_name?: string | null;
+  item_name?: string | null;
+  quantity?: number | null;
+  unit?: string | null;
+  needed_by?: string | null;
+  status?: string | null;
+  remarks?: string | null;
+  created_at?: string | null;
 }
 
-function getRowProjectName(row?: Partial<MaterialRequestRow> | null): string {
+function getProjectLabel(p?: ProjectOption | null): string {
+  if (!p) return '';
+  const vals = [p.project_name, p.name, p.site_name, p.title];
+  const hit = vals.find((v) => typeof v === 'string' && v.trim().length > 0);
+  return hit ? hit.trim() : '';
+}
+
+function resolveRowProjectName(
+  row?: Partial<MaterialRequestRow> | null,
+  projectLookup?: Map<string, string>
+): string {
   if (!row) return '';
-  const candidates = [row.project_name, row.project_site, row.site_name];
-  const found = candidates.find(
-    (val) => typeof val === 'string' && val.trim().length > 0
-  );
-  return found ? found.trim() : '';
-}
 
-function getProjectLabel(p: ProjectOption): string {
-  return (
-    p.project_name ||
-    p.name ||
-    p.site_name ||
-    p.title ||
-    String(p.id)
-  ).trim();
+  if (typeof row.project === 'string' && row.project.trim()) {
+    return row.project.trim();
+  }
+  if (typeof row.project === 'object' && row.project) {
+    const nested = row.project.name || row.project.title;
+    if (typeof nested === 'string' && nested.trim()) return nested.trim();
+  }
+
+  const directCandidates = [
+    row.project_name,
+    row.project_site,
+    row.site_name,
+    row.projects?.name,
+    row.projects?.title,
+    row.projects?.site_name,
+  ];
+  const foundDirect = directCandidates.find(
+    (v) => typeof v === 'string' && v.trim().length > 0
+  );
+  if (foundDirect) return foundDirect.trim();
+
+  if (row.project_id !== undefined && row.project_id !== null && projectLookup) {
+    const mapped = projectLookup.get(String(row.project_id));
+    if (mapped) return mapped;
+  }
+
+  return '';
 }
 
 export default function MaterialRequestsPage() {
@@ -78,6 +106,17 @@ export default function MaterialRequestsPage() {
     return `MR-UEPL-${stamp}-${rand}`;
   };
 
+  const projectLookup = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of projects) {
+      const label = getProjectLabel(p);
+      if (label && p.id !== undefined && p.id !== null) {
+        map.set(String(p.id), label);
+      }
+    }
+    return map;
+  }, [projects]);
+
   const loadEmptyOrLiveData = async () => {
     setLoading(true);
     setErrorMsg(null);
@@ -86,10 +125,16 @@ export default function MaterialRequestsPage() {
         .from('projects')
         .select('*');
 
-      if (!projErr && Array.isArray(projData)) {
-        setProjects(projData as ProjectOption[]);
-      } else {
-        setProjects([]);
+      const loadedProjects: ProjectOption[] =
+        !projErr && Array.isArray(projData) ? (projData as ProjectOption[]) : [];
+      setProjects(loadedProjects);
+
+      const lookup = new Map<string, string>();
+      for (const p of loadedProjects) {
+        const label = getProjectLabel(p);
+        if (label && p.id !== undefined && p.id !== null) {
+          lookup.set(String(p.id), label);
+        }
       }
 
       const { data: mrData, error: mrErr } = await supabase
@@ -97,21 +142,19 @@ export default function MaterialRequestsPage() {
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (mrErr) {
+      if (mrErr || !Array.isArray(mrData)) {
         setMrs([]);
-      } else if (Array.isArray(mrData)) {
+      } else {
         const rows = mrData as MaterialRequestRow[];
         setMrs(rows);
         if (rows.length > 0 && selectedMrId === null) {
           const firstRow = rows[0];
           setSelectedMrId(firstRow.id);
-          const firstProj = getRowProjectName(firstRow);
-          if (firstProj && !selectedProject) {
+          const firstProj = resolveRowProjectName(firstRow, lookup);
+          if (firstProj) {
             setSelectedProject(firstProj);
           }
         }
-      } else {
-        setMrs([]);
       }
     } catch {
       setProjects([]);
@@ -134,30 +177,47 @@ export default function MaterialRequestsPage() {
       if (label) set.add(label);
     }
     for (const row of mrs) {
-      const proj = getRowProjectName(row);
+      const proj = resolveRowProjectName(row, projectLookup);
       if (proj) set.add(proj);
     }
     return Array.from(set);
-  }, [projects, mrs]);
+  }, [projects, mrs, projectLookup]);
 
   const activeMr = useMemo(
     () => mrs.find((item) => String(item.id) === String(selectedMrId)) || null,
     [mrs, selectedMrId]
   );
 
-  const displayedProject = useMemo(() => {
-    if (selectedProject.trim()) return selectedProject.trim();
-    return getRowProjectName(activeMr);
-  }, [selectedProject, activeMr]);
+  const activeMrProject = useMemo(
+    () => resolveRowProjectName(activeMr, projectLookup),
+    [activeMr, projectLookup]
+  );
 
   const handleSelectMrRow = (row: MaterialRequestRow) => {
     setSelectedMrId(row.id);
-    const proj = getRowProjectName(row);
+    const proj = resolveRowProjectName(row, projectLookup);
     setSelectedProject(proj);
   };
 
-  const handleProjectInputChange = (val: string) => {
-    setSelectedProject(val);
+  const handleAssignProjectToSelectedMr = async (projName: string) => {
+    const cleanProj = projName.trim();
+    setSelectedProject(cleanProj);
+    if (!activeMr || !cleanProj) return;
+
+    setMrs((prev) =>
+      prev.map((r) =>
+        String(r.id) === String(activeMr.id) ? { ...r, project_name: cleanProj } : r
+      )
+    );
+
+    try {
+      await supabase
+        .from('material_requests')
+        .update({ project_name: cleanProj })
+        .eq('id', activeMr.id);
+    } catch {
+      // Keep local update if DB update fails
+    }
   };
 
   const handleCreateMr = async (e: React.FormEvent) => {
@@ -269,25 +329,37 @@ export default function MaterialRequestsPage() {
           </button>
         </div>
 
-        {/* Active Selected MR -> Project / Site Display Banner */}
-        <div className="bg-slate-900 border border-amber-500/40 rounded-xl p-4 shadow-lg flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        {/* Selected MR -> Indenting Project / Site Display */}
+        <div className="bg-slate-900 border border-amber-500/40 rounded-xl p-4 shadow-lg flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
             <p className="text-[11px] font-bold uppercase tracking-widest text-amber-400">
-              Indenting Project / Site (Selected MR)
+              Project / Site Against Selected MR
             </p>
             <p className="text-lg font-extrabold text-white mt-0.5">
-              {displayedProject || 'Select an MR below or enter a Project / Site'}
+              {activeMrProject || selectedProject || 'No project linked to this MR yet'}
+            </p>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {activeMr
+                ? `Selected MR: ${activeMr.mr_no ?? activeMr.mr_number ?? `#${activeMr.id}`}`
+                : 'Select an MR row below or enter a project below'}
             </p>
           </div>
-          <div className="text-xs text-slate-300 bg-slate-950 border border-slate-800 rounded-lg px-3.5 py-2">
-            {activeMr ? (
-              <span>
-                MR: <strong className="text-amber-300">{activeMr.mr_no ?? `#${activeMr.id}`}</strong>
-              </span>
-            ) : (
-              <span>New MR Draft</span>
-            )}
-          </div>
+
+          {projectSuggestions.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-slate-400">Set Project:</span>
+              {projectSuggestions.map((proj) => (
+                <button
+                  key={proj}
+                  type="button"
+                  onClick={() => handleAssignProjectToSelectedMr(proj)}
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-amber-500 hover:text-slate-950 border border-slate-700 text-xs font-bold text-amber-300 transition"
+                >
+                  {proj}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Create MR Form */}
@@ -335,7 +407,7 @@ export default function MaterialRequestsPage() {
                 list="erp-projects-list"
                 required
                 value={selectedProject}
-                onChange={(e) => handleProjectInputChange(e.target.value)}
+                onChange={(e) => setSelectedProject(e.target.value)}
                 placeholder="Enter or select project/site"
                 className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-700 text-sm text-white focus:outline-none focus:border-amber-400"
               />
@@ -440,7 +512,7 @@ export default function MaterialRequestsPage() {
             </h2>
             <span className="text-xs text-slate-400 flex items-center gap-1">
               <Building2 className="w-3.5 h-3.5 text-amber-400" />
-              Click any MR row to view its indenting Project / Site
+              Click any MR row to see its project
             </span>
           </div>
 
@@ -467,7 +539,7 @@ export default function MaterialRequestsPage() {
                   </tr>
                 ) : (
                   mrs.map((row) => {
-                    const rowProj = getRowProjectName(row) || '-';
+                    const rowProj = resolveRowProjectName(row, projectLookup) || 'Unlinked';
                     const isSelected = String(row.id) === String(selectedMrId);
                     return (
                       <tr
@@ -480,12 +552,14 @@ export default function MaterialRequestsPage() {
                         }`}
                       >
                         <td className="py-3 px-4 font-bold text-white">
-                          {row.mr_no ?? `#${row.id}`}
+                          {row.mr_no ?? row.mr_number ?? `#${row.id}`}
                         </td>
-                        <td className="py-3 px-4 font-semibold text-amber-300">
+                        <td className="py-3 px-4 font-bold text-amber-300">
                           {rowProj}
                         </td>
-                        <td className="py-3 px-4 text-slate-200">{row.material_name ?? '-'}</td>
+                        <td className="py-3 px-4 text-slate-200">
+                          {row.material_name ?? row.item_name ?? '-'}
+                        </td>
                         <td className="py-3 px-4 text-right font-bold text-amber-300">
                           {row.quantity ?? 0} {row.unit ?? ''}
                         </td>
