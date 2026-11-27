@@ -1,8 +1,8 @@
 ﻿'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Building2, PlusCircle, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { Building2, PlusCircle, RefreshCw, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
 interface ProjectRow {
@@ -47,33 +47,37 @@ export default function ProjectsMasterPage() {
   const [clientName, setClientName] = useState<string>('');
   const [status, setStatus] = useState<string>('ACTIVE');
 
-  const loadProjects = async () => {
+  const loadProjects = useCallback(async () => {
     setLoading(true);
     setErrorMsg(null);
     const local = readLocalProjects();
+
     try {
       const { data, error } = await supabase
         .from('projects')
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (!error && Array.isArray(data)) {
-        const rows = data as ProjectRow[];
-        setProjects(rows.length > 0 ? rows : local);
-        if (rows.length > 0) saveLocalProjects(rows);
-      } else {
+      if (error) {
+        setErrorMsg(`Supabase fetch warning: ${error.message}`);
         setProjects(local);
+        return;
       }
-    } catch {
+
+      const rows = Array.isArray(data) ? (data as ProjectRow[]) : [];
+      setProjects(rows);
+      saveLocalProjects(rows);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to load projects.');
       setProjects(local);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     loadProjects();
-  }, []);
+  }, [loadProjects]);
 
   const handleAddProject = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -82,63 +86,71 @@ export default function ProjectsMasterPage() {
     setErrorMsg(null);
 
     const cleanName = projectName.trim();
+    const cleanLocation = location.trim();
+    const cleanClient = clientName.trim() || 'Universal Engicon Pvt. Ltd.';
+
     if (!cleanName) {
       setErrorMsg('Please enter Project / Site Name.');
       setSubmitting(false);
       return;
     }
 
-    const newProj: ProjectRow = {
-      id: Date.now(),
-      project_name: cleanName,
-      name: cleanName,
-      site_name: cleanName,
-      location: location.trim() || '-',
-      client_name: clientName.trim() || 'Universal Engicon Pvt. Ltd.',
-      status,
-      created_at: new Date().toISOString(),
-    };
-
     try {
-      let inserted = false;
-
-      const { error: err1 } = await supabase.from('projects').insert([
-        {
-          name: cleanName,
-          site_name: location.trim() || cleanName,
-          status,
-        },
-      ]);
-
-      if (!err1) {
-        inserted = true;
-      } else {
-        const { error: err2 } = await supabase.from('projects').insert([
+      // Try standard schema first (name, site_name, status)
+      let { data, error } = await supabase
+        .from('projects')
+        .insert([
           {
-            project_name: cleanName,
-            location: location.trim() || null,
-            client_name: clientName.trim() || null,
+            name: cleanName,
+            site_name: cleanLocation || cleanName,
+            location: cleanLocation || null,
+            client_name: cleanClient,
             status,
           },
-        ]);
-        if (!err2) inserted = true;
+        ])
+        .select('*');
+
+      // Fallback if table uses project_name instead of name
+      if (error) {
+        const retry = await supabase
+          .from('projects')
+          .insert([
+            {
+              project_name: cleanName,
+              site_name: cleanLocation || cleanName,
+              location: cleanLocation || null,
+              client_name: cleanClient,
+              status,
+            },
+          ])
+          .select('*');
+
+        data = retry.data;
+        error = retry.error;
       }
 
-      const updatedLocal = [newProj, ...readLocalProjects()];
-      saveLocalProjects(updatedLocal);
-
-      if (inserted) {
-        await loadProjects();
-      } else {
-        setProjects(updatedLocal);
+      if (error) {
+        setErrorMsg(`Database save failed: ${error.message}`);
+        return;
       }
 
-      setStatusMsg(`Project "${cleanName}" added successfully!`);
+      await loadProjects();
+      setStatusMsg(`Project "${cleanName}" saved to Supabase.`);
       setProjectName('');
       setLocation('');
       setClientName('');
+
+      // Keep newly created row available if order doesn't include created_at
+      if (Array.isArray(data) && data.length > 0) {
+        setProjects((prev) => {
+          const exists = prev.some((r) => String(r.id) === String(data[0].id));
+          const merged = exists ? prev : ([data[0], ...prev] as ProjectRow[]);
+          saveLocalProjects(merged);
+          return merged;
+        });
+      }
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Failed to save project.');
+      setErrorMsg(err instanceof Error ? err.message : 'Unexpected error saving project.');
     } finally {
       setSubmitting(false);
     }
@@ -195,8 +207,9 @@ export default function ProjectsMasterPage() {
           )}
 
           {errorMsg && (
-            <div className="p-3 rounded-lg bg-red-950/70 border border-red-700 text-red-200 text-xs font-semibold">
-              {errorMsg}
+            <div className="flex items-center gap-2 p-3 rounded-lg bg-red-950/70 border border-red-700 text-red-200 text-xs font-semibold">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span>{errorMsg}</span>
             </div>
           )}
 

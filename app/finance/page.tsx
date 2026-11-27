@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Landmark,
   PlusCircle,
@@ -9,6 +9,8 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
   ReceiptIndianRupee,
+  ShieldCheck,
+  AlertTriangle,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { getClientErpRole } from '@/lib/erp-session';
@@ -19,17 +21,54 @@ interface LedgerEntry {
   voucher_no?: string;
   entry_type?: string;
   account_head?: string;
+  account_name?: string;
   party_name?: string;
+  project_name?: string;
+  po_no?: string;
+  grn_no?: string;
   base_amount?: number;
   gst_amount?: number;
   total_amount?: number;
+  debit?: number;
+  credit?: number;
   description?: string;
   created_at?: string;
+}
+
+interface PoLite {
+  id: string | number;
+  po_no?: string | null;
+  po_number?: string | null;
+  vendor_name?: string | null;
+  project_name?: string | null;
+  quantity?: number | string | null;
+  total_amount?: number | string | null;
+}
+
+interface GrnLite {
+  id: string | number;
+  grn_no?: string | null;
+  po_no?: string | null;
+  po_id?: string | number | null;
+  received_qty?: number | string | null;
+  accepted_qty?: number | string | null;
+  quantity?: number | string | null;
+}
+
+function toNum(v: unknown): number {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+  if (typeof v === 'string') {
+    const n = Number(v.replace(/[^0-9.-]/g, ''));
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
 }
 
 export default function FinanceGstLedgerPage() {
   const [role, setRole] = useState<ErpRole | null>(null);
   const [entries, setEntries] = useState<LedgerEntry[]>([]);
+  const [pos, setPos] = useState<PoLite[]>([]);
+  const [grns, setGrns] = useState<GrnLite[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
@@ -39,6 +78,9 @@ export default function FinanceGstLedgerPage() {
   const [entryType, setEntryType] = useState<'CREDIT' | 'DEBIT'>('CREDIT');
   const [accountHead, setAccountHead] = useState<string>('Project Revenue / RA Receipt');
   const [partyName, setPartyName] = useState<string>('');
+  const [projectName, setProjectName] = useState<string>('');
+  const [selectedPoNo, setSelectedPoNo] = useState<string>('');
+  const [selectedGrnNo, setSelectedGrnNo] = useState<string>('');
   const [baseAmount, setBaseAmount] = useState<string>('');
   const [gstRate, setGstRate] = useState<string>('18');
   const [description, setDescription] = useState<string>('');
@@ -49,33 +91,92 @@ export default function FinanceGstLedgerPage() {
     return `VCH-UEPL-${stamp}-${rand}`;
   };
 
-  const loadLedger = async () => {
+  const loadLedger = useCallback(async () => {
     setLoading(true);
     setErrorMsg(null);
     try {
-      const { data, error } = await supabase
-        .from('finance_ledger')
-        .select('*')
-        .order('created_at', { ascending: false });
+      const [ledRes, poRes, grnRes] = await Promise.allSettled([
+        supabase.from('finance_ledger').select('*').order('created_at', { ascending: false }),
+        supabase.from('purchase_orders').select('*').order('created_at', { ascending: false }).limit(50),
+        supabase.from('goods_receipt_notes').select('*').order('created_at', { ascending: false }).limit(50),
+      ]);
 
-      if (error) {
-        setErrorMsg(`Supabase RLS / Query Notice: ${error.message}`);
-        setEntries([]);
-      } else if (Array.isArray(data)) {
-        setEntries(data as LedgerEntry[]);
+      if (ledRes.status === 'fulfilled') {
+        if (ledRes.value.error) {
+          setErrorMsg(`Supabase RLS / Query Notice: ${ledRes.value.error.message}`);
+          setEntries([]);
+        } else if (Array.isArray(ledRes.value.data)) {
+          setEntries(ledRes.value.data as LedgerEntry[]);
+        }
+      }
+
+      if (poRes.status === 'fulfilled' && !poRes.value.error && Array.isArray(poRes.value.data)) {
+        setPos(poRes.value.data as PoLite[]);
+      }
+
+      if (grnRes.status === 'fulfilled' && !grnRes.value.error && Array.isArray(grnRes.value.data)) {
+        setGrns(grnRes.value.data as GrnLite[]);
       }
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Failed to load finance ledger.');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     setRole(getClientErpRole());
     setVoucherNo(generateVoucherNo());
     loadLedger();
-  }, []);
+  }, [loadLedger]);
+
+  const threeWayStatus = useMemo(() => {
+    if (entryType !== 'DEBIT') {
+      return { ok: true, label: 'Receipt / Credit Entry — 3-Way PO/GRN Not Required' };
+    }
+    const poClean = selectedPoNo.trim().toLowerCase();
+    const grnClean = selectedGrnNo.trim().toLowerCase();
+
+    if (!poClean || !grnClean) {
+      return {
+        ok: false,
+        label: '3-Way Match Incomplete: Select/enter both PO No. and GRN No. for vendor debit.',
+      };
+    }
+
+    const matchedPo = pos.find(
+      (p) => String(p.po_no ?? p.po_number ?? '').trim().toLowerCase() === poClean
+    );
+    const matchedGrn = grns.find(
+      (g) => String(g.grn_no ?? '').trim().toLowerCase() === grnClean
+    );
+
+    if (!matchedPo || !matchedGrn) {
+      return {
+        ok: false,
+        label: `3-Way Reference Check: ${!matchedPo ? 'PO not found in PO list' : ''} ${!matchedPo && !matchedGrn ? ' & ' : ''} ${!matchedGrn ? 'GRN not found in GRN list' : ''}`.trim(),
+      };
+    }
+
+    const grnLinkedToPo =
+      (matchedGrn.po_no && String(matchedGrn.po_no).trim().toLowerCase() === poClean) ||
+      (matchedGrn.po_id !== undefined &&
+        matchedGrn.po_id !== null &&
+        matchedPo.id !== undefined &&
+        String(matchedGrn.po_id) === String(matchedPo.id));
+
+    if (!grnLinkedToPo) {
+      return {
+        ok: false,
+        label: '3-Way Mismatch: Selected GRN is not linked to the selected PO.',
+      };
+    }
+
+    return {
+      ok: true,
+      label: `3-Way Verified: ${matchedPo.po_no ?? matchedPo.po_number} ↔ ${matchedGrn.grn_no} linked.`,
+    };
+  }, [entryType, selectedPoNo, selectedGrnNo, pos, grns]);
 
   const handleCreateEntry = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -94,6 +195,19 @@ export default function FinanceGstLedgerPage() {
 
     const gstAmt = Number(((base * rate) / 100).toFixed(2));
     const totalAmt = Number((base + gstAmt).toFixed(2));
+    const cleanParty = partyName.trim() || 'General Account';
+    const cleanProject = projectName.trim() || null;
+    const cleanPo = selectedPoNo.trim() || null;
+    const cleanGrn = selectedGrnNo.trim() || null;
+    const cleanDesc =
+      description.trim() ||
+      [
+        `${entryType} voucher entry`,
+        cleanPo ? `PO: ${cleanPo}` : '',
+        cleanGrn ? `GRN: ${cleanGrn}` : '',
+      ]
+        .filter(Boolean)
+        .join(' | ');
 
     try {
       const { error } = await supabase.from('finance_ledger').insert([
@@ -101,11 +215,17 @@ export default function FinanceGstLedgerPage() {
           voucher_no: voucherNo,
           entry_type: entryType,
           account_head: accountHead,
-          party_name: partyName.trim() || 'General Account',
+          account_name: accountHead,
+          party_name: cleanParty,
+          project_name: cleanProject,
+          po_no: cleanPo,
+          grn_no: cleanGrn,
           base_amount: base,
           gst_amount: gstAmt,
           total_amount: totalAmt,
-          description: description.trim() || `${entryType} voucher entry`,
+          debit: entryType === 'DEBIT' ? totalAmt : 0,
+          credit: entryType === 'CREDIT' ? totalAmt : 0,
+          description: cleanDesc,
         },
       ]);
 
@@ -122,7 +242,7 @@ export default function FinanceGstLedgerPage() {
             module: 'FINANCE_GST_LEDGER',
             performed_by: `Role: ${role ?? 'Unauthenticated'}`,
             role_used: role ?? 'ACCOUNTANT',
-            details: `${voucherNo} | ${entryType} | Base: ₹${base} + GST: ₹${gstAmt} = ₹${totalAmt}`,
+            details: `${voucherNo} | ${entryType} | Base: ₹${base} + GST: ₹${gstAmt} = ₹${totalAmt}${cleanPo ? ` | PO: ${cleanPo}` : ''}${cleanGrn ? ` | GRN: ${cleanGrn}` : ''}`,
           },
         ]);
       } catch {
@@ -132,6 +252,8 @@ export default function FinanceGstLedgerPage() {
       setStatusMsg(`Voucher ${voucherNo} posted (Total: ₹${totalAmt.toLocaleString('en-IN')}).`);
       setBaseAmount('');
       setPartyName('');
+      setSelectedPoNo('');
+      setSelectedGrnNo('');
       setDescription('');
       setVoucherNo(generateVoucherNo());
       await loadLedger();
@@ -144,11 +266,11 @@ export default function FinanceGstLedgerPage() {
 
   const totalCredits = entries
     .filter((e) => (e.entry_type ?? '').toUpperCase() === 'CREDIT')
-    .reduce((sum, e) => sum + Number(e.total_amount ?? e.base_amount ?? 0), 0);
+    .reduce((sum, e) => sum + Number(e.total_amount ?? e.credit ?? e.base_amount ?? 0), 0);
 
   const totalDebits = entries
     .filter((e) => (e.entry_type ?? '').toUpperCase() === 'DEBIT')
-    .reduce((sum, e) => sum + Number(e.total_amount ?? e.base_amount ?? 0), 0);
+    .reduce((sum, e) => sum + Number(e.total_amount ?? e.debit ?? e.base_amount ?? 0), 0);
 
   const totalGst = entries.reduce((sum, e) => sum + Number(e.gst_amount ?? 0), 0);
 
@@ -167,10 +289,10 @@ export default function FinanceGstLedgerPage() {
           <div>
             <div className="flex items-center gap-2 text-amber-400 text-xs font-bold uppercase tracking-widest">
               <Landmark className="w-4 h-4" />
-              Double-Entry Accounting & GST Compliance
+              Double-Entry Accounting &amp; GST Compliance
             </div>
             <h1 className="text-2xl font-extrabold text-white tracking-tight mt-0.5">
-              Finance & GST Ledger — UNIVERSAL ENGICON PVT. LTD.
+              Finance &amp; GST Ledger — UNIVERSAL ENGICON PVT. LTD.
             </h1>
             <p className="text-xs text-slate-400 mt-1">
               Active Role:{' '}
@@ -214,7 +336,7 @@ export default function FinanceGstLedgerPage() {
 
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg">
             <div className="flex items-center justify-between text-xs font-bold uppercase text-slate-400">
-              <span>Net Cash Surplus / P&L</span>
+              <span>Net Cash Surplus / P&amp;L</span>
               <Landmark className="w-4 h-4 text-amber-400" />
             </div>
             <div className="text-2xl font-extrabold text-white mt-2">
@@ -254,6 +376,21 @@ export default function FinanceGstLedgerPage() {
               {errorMsg}
             </div>
           )}
+
+          <div
+            className={`flex items-center gap-2 p-3 rounded-lg border text-xs font-semibold ${
+              threeWayStatus.ok
+                ? 'bg-slate-950/80 border-slate-700 text-emerald-300'
+                : 'bg-amber-950/40 border-amber-700/70 text-amber-200'
+            }`}
+          >
+            {threeWayStatus.ok ? (
+              <ShieldCheck className="w-4 h-4 shrink-0 text-emerald-400" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
+            )}
+            <span>{threeWayStatus.label}</span>
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div>
@@ -308,6 +445,69 @@ export default function FinanceGstLedgerPage() {
                 placeholder="Party or client name"
                 className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-700 text-sm text-white focus:outline-none focus:border-amber-400"
               />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-300 mb-1.5">
+                Project / Site (Optional)
+              </label>
+              <input
+                type="text"
+                value={projectName}
+                onChange={(e) => setProjectName(e.target.value)}
+                placeholder="e.g. Godrej Zen Estate Phase-2"
+                className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-700 text-sm text-white focus:outline-none focus:border-amber-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-300 mb-1.5">
+                PO Reference (3-Way Match)
+              </label>
+              <input
+                type="text"
+                list="po-match-options"
+                value={selectedPoNo}
+                onChange={(e) => setSelectedPoNo(e.target.value)}
+                placeholder="Select or type PO No."
+                className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-700 text-sm text-white focus:outline-none focus:border-amber-400"
+              />
+              <datalist id="po-match-options">
+                {pos.map((p) => {
+                  const code = String(p.po_no ?? p.po_number ?? p.id);
+                  return (
+                    <option key={String(p.id)} value={code}>
+                      {p.vendor_name ? `${code} - ${p.vendor_name}` : code}
+                    </option>
+                  );
+                })}
+              </datalist>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-300 mb-1.5">
+                GRN Reference (3-Way Match)
+              </label>
+              <input
+                type="text"
+                list="grn-match-options"
+                value={selectedGrnNo}
+                onChange={(e) => setSelectedGrnNo(e.target.value)}
+                placeholder="Select or type GRN No."
+                className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-700 text-sm text-white focus:outline-none focus:border-amber-400"
+              />
+              <datalist id="grn-match-options">
+                {grns.map((g) => {
+                  const code = String(g.grn_no ?? `GRN-${g.id}`);
+                  return (
+                    <option key={String(g.id)} value={code}>
+                      {g.po_no ? `${code} (PO: ${g.po_no})` : code}
+                    </option>
+                  );
+                })}
+              </datalist>
             </div>
           </div>
 
@@ -373,7 +573,7 @@ export default function FinanceGstLedgerPage() {
         <div className="bg-slate-900 border border-slate-800 rounded-xl shadow-xl overflow-hidden">
           <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between">
             <h2 className="text-sm font-bold uppercase tracking-wider text-amber-400">
-              General Ledger & GST Register ({entries.length})
+              General Ledger &amp; GST Register ({entries.length})
             </h2>
           </div>
 
@@ -417,9 +617,13 @@ export default function FinanceGstLedgerPage() {
                       </td>
                       <td className="py-3 px-4">
                         <div className="font-semibold text-slate-200">
-                          {row.account_head ?? '-'}
+                          {row.account_head ?? row.account_name ?? '-'}
                         </div>
-                        <div className="text-slate-400">{row.party_name ?? ''}</div>
+                        <div className="text-slate-400">
+                          {row.party_name ?? ''}
+                          {row.po_no ? ` • PO: ${row.po_no}` : ''}
+                          {row.grn_no ? ` • GRN: ${row.grn_no}` : ''}
+                        </div>
                       </td>
                       <td className="py-3 px-4 text-right text-slate-300">
                         {formatINR(Number(row.base_amount ?? 0))}
@@ -428,7 +632,7 @@ export default function FinanceGstLedgerPage() {
                         {formatINR(Number(row.gst_amount ?? 0))}
                       </td>
                       <td className="py-3 px-4 text-right font-bold text-white">
-                        {formatINR(Number(row.total_amount ?? row.base_amount ?? 0))}
+                        {formatINR(Number(row.total_amount ?? row.debit ?? row.credit ?? row.base_amount ?? 0))}
                       </td>
                     </tr>
                   ))

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   ClipboardList,
@@ -99,6 +99,34 @@ function resolveRowProjectName(
   return '';
 }
 
+function readLocalCache(): MaterialRequestRow[] {
+  try {
+    const raw = localStorage.getItem(MR_LOCAL_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as MaterialRequestRow[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalCache(rows: MaterialRequestRow[]) {
+  try {
+    localStorage.setItem(MR_LOCAL_STORAGE_KEY, JSON.stringify(rows));
+  } catch {}
+}
+
+function readLocalProjects(): ProjectOption[] {
+  try {
+    const raw = localStorage.getItem(PROJECTS_LOCAL_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as ProjectOption[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 export default function MaterialRequestsPage() {
   const [role, setRole] = useState<ErpRole | null>(null);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
@@ -126,34 +154,6 @@ export default function MaterialRequestsPage() {
     return `MR-UEPL-${stamp}-${rand}`;
   };
 
-  const saveLocalCache = (rows: MaterialRequestRow[]) => {
-    try {
-      localStorage.setItem(MR_LOCAL_STORAGE_KEY, JSON.stringify(rows));
-    } catch {}
-  };
-
-  const readLocalCache = (): MaterialRequestRow[] => {
-    try {
-      const raw = localStorage.getItem(MR_LOCAL_STORAGE_KEY);
-      if (!raw) return [];
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? (parsed as MaterialRequestRow[]) : [];
-    } catch {
-      return [];
-    }
-  };
-
-  const readLocalProjects = (): ProjectOption[] => {
-    try {
-      const raw = localStorage.getItem(PROJECTS_LOCAL_KEY);
-      if (!raw) return [];
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? (parsed as ProjectOption[]) : [];
-    } catch {
-      return [];
-    }
-  };
-
   const projectLookup = useMemo(() => {
     const map = new Map<string, string>();
     for (const p of projects) {
@@ -165,83 +165,105 @@ export default function MaterialRequestsPage() {
     return map;
   }, [projects]);
 
-  const loadEmptyOrLiveData = async () => {
-    setLoading(true);
-    setErrorMsg(null);
-    const localProjects = readLocalProjects();
-    try {
-      const { data: projData, error: projErr } = await supabase
-        .from('projects')
-        .select('*');
-
-      const dbProjects: ProjectOption[] =
-        !projErr && Array.isArray(projData) ? (projData as ProjectOption[]) : [];
-      const loadedProjects = dbProjects.length > 0 ? dbProjects : localProjects;
-      setProjects(loadedProjects);
-
-      const lookup = new Map<string, string>();
-      for (const p of loadedProjects) {
-        const label = getProjectLabel(p);
-        if (label && p.id !== undefined && p.id !== null) {
-          lookup.set(String(p.id), label);
-        }
+  const projectIdByName = useMemo(() => {
+    const map = new Map<string, string | number>();
+    for (const p of projects) {
+      const label = getProjectLabel(p);
+      if (label && p.id !== undefined && p.id !== null) {
+        map.set(label.toLowerCase(), p.id);
       }
+    }
+    return map;
+  }, [projects]);
 
-      const cachedRows = readLocalCache();
-      const cacheMap = new Map<string, string>();
-      for (const c of cachedRows) {
-        const cProj = resolveRowProjectName(c, lookup);
-        if (cProj) {
-          cacheMap.set(String(c.id), cProj);
-          if (c.mr_no) cacheMap.set(String(c.mr_no), cProj);
-        }
-      }
+  const loadEmptyOrLiveData = useCallback(
+    async (preferredSelectedId?: string | number | null) => {
+      setLoading(true);
+      setErrorMsg(null);
+      const localProjects = readLocalProjects();
 
-      const { data: mrData, error: mrErr } = await supabase
-        .from('material_requests')
-        .select('*')
-        .order('created_at', { ascending: false });
+      try {
+        const { data: projData, error: projErr } = await supabase
+          .from('projects')
+          .select('*');
 
-      if (mrErr || !Array.isArray(mrData)) {
-        setMrs(cachedRows);
-      } else {
-        const mergedRows = (mrData as MaterialRequestRow[]).map((row) => {
-          const resolved = resolveRowProjectName(row, lookup);
-          const fallbackProj =
-            resolved ||
-            cacheMap.get(String(row.id)) ||
-            (row.mr_no ? cacheMap.get(String(row.mr_no)) : '') ||
-            '';
-          return {
-            ...row,
-            project_name: fallbackProj || row.project_name || '',
-          };
-        });
+        const dbProjects: ProjectOption[] =
+          !projErr && Array.isArray(projData) ? (projData as ProjectOption[]) : [];
+        const loadedProjects = dbProjects.length > 0 ? dbProjects : localProjects;
+        setProjects(loadedProjects);
 
-        setMrs(mergedRows);
-        saveLocalCache(mergedRows);
-
-        if (mergedRows.length > 0 && selectedMrId === null) {
-          const firstRow = mergedRows[0];
-          setSelectedMrId(firstRow.id);
-          const firstProj = resolveRowProjectName(firstRow, lookup);
-          if (firstProj) {
-            setSelectedProject(firstProj);
+        const lookup = new Map<string, string>();
+        for (const p of loadedProjects) {
+          const label = getProjectLabel(p);
+          if (label && p.id !== undefined && p.id !== null) {
+            lookup.set(String(p.id), label);
           }
         }
+
+        const cachedRows = readLocalCache();
+        const cacheMap = new Map<string, string>();
+        for (const c of cachedRows) {
+          const cProj = resolveRowProjectName(c, lookup);
+          if (cProj) {
+            cacheMap.set(String(c.id), cProj);
+            if (c.mr_no) cacheMap.set(String(c.mr_no), cProj);
+          }
+        }
+
+        const { data: mrData, error: mrErr } = await supabase
+          .from('material_requests')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (mrErr || !Array.isArray(mrData)) {
+          setMrs(cachedRows);
+        } else {
+          const mergedRows = (mrData as MaterialRequestRow[]).map((row) => {
+            const resolved = resolveRowProjectName(row, lookup);
+            const fallbackProj =
+              resolved ||
+              cacheMap.get(String(row.id)) ||
+              (row.mr_no ? cacheMap.get(String(row.mr_no)) : '') ||
+              '';
+            return {
+              ...row,
+              project_name: fallbackProj || row.project_name || '',
+            };
+          });
+
+          setMrs(mergedRows);
+          saveLocalCache(mergedRows);
+
+          const targetId = preferredSelectedId ?? selectedMrId;
+          if (mergedRows.length > 0) {
+            const matchedRow =
+              targetId !== null && targetId !== undefined
+                ? mergedRows.find((r) => String(r.id) === String(targetId))
+                : mergedRows[0];
+
+            const activeRow = matchedRow ?? mergedRows[0];
+            setSelectedMrId(activeRow.id);
+            const activeProj = resolveRowProjectName(activeRow, lookup);
+            if (activeProj) {
+              setSelectedProject(activeProj);
+            }
+          }
+        }
+      } catch {
+        setProjects(localProjects);
+        setMrs(readLocalCache());
+      } finally {
+        setLoading(false);
       }
-    } catch {
-      setProjects(localProjects);
-      setMrs(readLocalCache());
-    } finally {
-      setLoading(false);
-    }
-  };
+    },
+    [selectedMrId]
+  );
 
   useEffect(() => {
     setRole(getClientErpRole());
     setMrNo(generateMrNo());
     loadEmptyOrLiveData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleQuickAddProject = async () => {
@@ -305,7 +327,9 @@ export default function MaterialRequestsPage() {
   const handleSelectMrRow = (row: MaterialRequestRow) => {
     setSelectedMrId(row.id);
     const proj = resolveRowProjectName(row, projectLookup);
-    setSelectedProject(proj);
+    if (proj) {
+      setSelectedProject(proj);
+    }
   };
 
   const handleAssignProjectToMr = async (
@@ -315,11 +339,19 @@ export default function MaterialRequestsPage() {
     const cleanProj = projName.trim();
     if (!cleanProj) return;
 
+    const matchedProjectId = projectIdByName.get(cleanProj.toLowerCase()) ?? null;
+
     setSelectedMrId(targetRow.id);
     setSelectedProject(cleanProj);
 
     const updated = mrs.map((r) =>
-      String(r.id) === String(targetRow.id) ? { ...r, project_name: cleanProj } : r
+      String(r.id) === String(targetRow.id)
+        ? {
+            ...r,
+            project_name: cleanProj,
+            project_id: matchedProjectId ?? r.project_id ?? null,
+          }
+        : r
     );
     setMrs(updated);
     saveLocalCache(updated);
@@ -327,7 +359,10 @@ export default function MaterialRequestsPage() {
     try {
       await supabase
         .from('material_requests')
-        .update({ project_name: cleanProj })
+        .update({
+          project_name: cleanProj,
+          ...(matchedProjectId !== null ? { project_id: matchedProjectId } : {}),
+        })
         .eq('id', targetRow.id);
     } catch {}
   };
@@ -348,9 +383,12 @@ export default function MaterialRequestsPage() {
       return;
     }
 
+    const matchedProjectId = projectIdByName.get(cleanProject.toLowerCase()) ?? null;
+
     const newRow: MaterialRequestRow = {
       id: Date.now(),
       mr_no: mrNo,
+      project_id: matchedProjectId,
       project_name: cleanProject,
       material_name: materialName.trim(),
       quantity: qtyNum,
@@ -362,18 +400,27 @@ export default function MaterialRequestsPage() {
     };
 
     try {
-      const { error } = await supabase.from('material_requests').insert([
-        {
-          mr_no: newRow.mr_no,
-          project_name: newRow.project_name,
-          material_name: newRow.material_name,
-          quantity: newRow.quantity,
-          unit: newRow.unit,
-          needed_by: neededBy || null,
-          status: newRow.status,
-          remarks: newRow.remarks,
-        },
-      ]);
+      const { data: insertedData, error } = await supabase
+        .from('material_requests')
+        .insert([
+          {
+            mr_no: newRow.mr_no,
+            project_id: matchedProjectId,
+            project_name: newRow.project_name,
+            material_name: newRow.material_name,
+            quantity: newRow.quantity,
+            unit: newRow.unit,
+            needed_by: neededBy || null,
+            status: newRow.status,
+            remarks: newRow.remarks,
+          },
+        ])
+        .select('*');
+
+      const realId =
+        Array.isArray(insertedData) && insertedData[0]?.id !== undefined
+          ? insertedData[0].id
+          : newRow.id;
 
       try {
         await supabase.from('erp_audit_logs').insert([
@@ -387,17 +434,17 @@ export default function MaterialRequestsPage() {
         ]);
       } catch {}
 
+      const persistedRow: MaterialRequestRow = { ...newRow, id: realId };
+      const nextList = [persistedRow, ...mrs.filter((r) => String(r.id) !== String(realId))];
+      saveLocalCache(nextList);
+
       if (error) {
-        const nextList = [newRow, ...mrs];
         setMrs(nextList);
-        saveLocalCache(nextList);
+        setSelectedMrId(realId);
       } else {
-        const nextList = [newRow, ...mrs];
-        saveLocalCache(nextList);
-        await loadEmptyOrLiveData();
+        await loadEmptyOrLiveData(realId);
       }
 
-      setSelectedMrId(newRow.id);
       setSelectedProject(cleanProject);
       setStatusMsg(`Material Request ${newRow.mr_no} created for ${cleanProject}.`);
       setMaterialName('');
@@ -443,7 +490,7 @@ export default function MaterialRequestsPage() {
             </Link>
             <button
               type="button"
-              onClick={loadEmptyOrLiveData}
+              onClick={() => loadEmptyOrLiveData()}
               className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 text-xs font-bold uppercase tracking-wider transition-all"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -707,6 +754,10 @@ export default function MaterialRequestsPage() {
                 ) : (
                   mrs.map((row) => {
                     const rowProj = resolveRowProjectName(row, projectLookup);
+                    const rowOptions =
+                      rowProj && !projectSuggestions.includes(rowProj)
+                        ? [rowProj, ...projectSuggestions]
+                        : projectSuggestions;
                     const isSelected = String(row.id) === String(selectedMrId);
                     return (
                       <tr
@@ -725,16 +776,14 @@ export default function MaterialRequestsPage() {
                           className="py-3 px-4 font-bold text-amber-300"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          {projectSuggestions.length > 0 ? (
+                          {rowOptions.length > 0 ? (
                             <select
                               value={rowProj}
                               onChange={(e) => handleAssignProjectToMr(row, e.target.value)}
                               className="px-2.5 py-1.5 rounded bg-slate-950 border border-slate-700 text-amber-300 font-bold text-xs focus:outline-none focus:border-amber-400"
                             >
-                              <option value="">
-                                {rowProj ? rowProj : '-- Select Project --'}
-                              </option>
-                              {projectSuggestions.map((proj) => (
+                              <option value="">-- Select Project --</option>
+                              {rowOptions.map((proj) => (
                                 <option key={proj} value={proj}>
                                   {proj}
                                 </option>
