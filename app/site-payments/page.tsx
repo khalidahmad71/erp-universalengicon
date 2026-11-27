@@ -1,762 +1,461 @@
-"use client";
+'use client';
 
-import React, { useState, useEffect, useMemo } from "react";
-import Link from "next/link";
-import { createClient } from "@supabase/supabase-js";
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import {
+  Wallet,
+  PlusCircle,
+  RefreshCw,
+  CheckCircle2,
+  AlertTriangle,
+  ArrowLeft,
+  Wifi,
+  WifiOff,
+} from 'lucide-react';
+import { supabase } from '@/lib/supabase';
+import { getClientErpRole } from '@/lib/erp-session';
+import type { ErpRole } from '@/lib/rbac';
 
-type PaymentCategory = "Labor" | "Staff" | "Vendor" | "Petty Cash";
-type PaymentMode = "UPI" | "Cash" | "NEFT" | "Cheque";
-
-interface SitePaymentEntry {
-  client_ref: string;
-  entry_date: string;
-  project_site: string;
-  category: PaymentCategory;
-  payee_name: string;
-  payment_mode: PaymentMode;
-  amount: number;
-  remarks: string;
-  synced_to_supabase: boolean;
-  erp_posted: boolean;
-  created_at: string;
+interface SitePaymentRow {
+  id: string | number;
+  project_name?: string | null;
+  category?: string | null;
+  payee_name?: string | null;
+  amount?: number | string | null;
+  payment_mode?: string | null;
+  payment_date?: string | null;
+  remarks?: string | null;
+  created_at?: string | null;
+  synced?: boolean;
 }
 
-const STORAGE_KEY = "ue_site_daily_payments_v1";
-const DEVICE_AUTH_KEY = "ue_site_pay_device_auth_v1";
+const SITE_PAYMENTS_LOCAL_KEY = 'ue_site_daily_payments_v1';
 
-function getSupabaseBrowserClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-  return createClient(url, anonKey, {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: true,
-    },
-  });
-}
-
-const supabase = getSupabaseBrowserClient();
-
-function formatINR(num: number): string {
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 0,
-  }).format(num || 0);
-}
-
-function getTodayISO(): string {
-  const now = new Date();
-  const offset = now.getTimezoneOffset();
-  const local = new Date(now.getTime() - offset * 60000);
-  return local.toISOString().split("T")[0];
-}
-
-function checkExistingErpAuth(): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    if (localStorage.getItem(DEVICE_AUTH_KEY) === "1") return true;
-    if (document.cookie.includes("erp_role=")) return true;
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i) || "";
-      if (
-        key.includes("erp_role") ||
-        key.includes("ue_user") ||
-        key.includes("auth-token") ||
-        key.includes("supabase.auth")
-      ) {
-        const val = localStorage.getItem(key);
-        if (val && val !== "null" && val !== "undefined" && val !== "") {
-          return true;
-        }
-      }
-    }
-  } catch {
-    return false;
+function toNum(v: unknown): number {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+  if (typeof v === 'string') {
+    const n = Number(v.replace(/[^0-9.-]/g, ''));
+    return Number.isFinite(n) ? n : 0;
   }
-  return false;
+  return 0;
 }
 
-export default function SitePaymentsMobilePage() {
-  const [authState, setAuthState] = useState<"checking" | "allowed" | "locked">("checking");
+function formatINR(val: number): string {
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 2,
+  }).format(Number.isFinite(val) ? val : 0);
+}
 
-  const [activeTab, setActiveTab] = useState<"entry" | "log">("entry");
-  const [entries, setEntries] = useState<SitePaymentEntry[]>([]);
-  const [isLoaded, setIsLoaded] = useState<boolean>(false);
+function readLocalPayments(): SitePaymentRow[] {
+  try {
+    const raw = localStorage.getItem(SITE_PAYMENTS_LOCAL_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as SitePaymentRow[]) : [];
+  } catch {
+    return [];
+  }
+}
 
-  const [entryDate, setEntryDate] = useState<string>(getTodayISO());
-  const [projectSite, setProjectSite] = useState<string>("");
-  const [category, setCategory] = useState<PaymentCategory>("Labor");
-  const [payeeName, setPayeeName] = useState<string>("");
-  const [paymentMode, setPaymentMode] = useState<PaymentMode>("UPI");
-  const [amountInput, setAmountInput] = useState<string>("");
-  const [remarks, setRemarks] = useState<string>("");
+function saveLocalPayments(rows: SitePaymentRow[]): void {
+  try {
+    localStorage.setItem(SITE_PAYMENTS_LOCAL_KEY, JSON.stringify(rows));
+  } catch {}
+}
 
-  const [isSyncing, setIsSyncing] = useState<boolean>(false);
-  const [toast, setToast] = useState<{ msg: string; type: "success" | "error" | "info" } | null>(
-    null
+export default function SitePaymentsPage() {
+  const [role, setRole] = useState<ErpRole | null>(null);
+  const [payments, setPayments] = useState<SitePaymentRow[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [submitting, setSubmitting] = useState<boolean>(false);
+  const [isOnline, setIsOnline] = useState<boolean>(true);
+  const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const [projectName, setProjectName] = useState<string>('');
+  const [category, setCategory] = useState<string>('LABOR');
+  const [payeeName, setPayeeName] = useState<string>('');
+  const [amount, setAmount] = useState<string>('');
+  const [paymentMode, setPaymentMode] = useState<string>('UPI');
+  const [paymentDate, setPaymentDate] = useState<string>(() =>
+    new Date().toISOString().slice(0, 10)
   );
-  const [filterSite, setFilterSite] = useState<string>("ALL");
-  const [showInstallGuide, setShowInstallGuide] = useState<boolean>(false);
+  const [remarks, setRemarks] = useState<string>('');
 
-  const showToast = (msg: string, type: "success" | "error" | "info" = "success") => {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 3200);
-  };
+  const syncPayments = useCallback(async () => {
+    setLoading(true);
+    setErrorMsg(null);
+    const localRows = readLocalPayments();
 
-  useEffect(() => {
-    let active = true;
+    try {
+      const { data, error } = await supabase
+        .from('site_daily_payments')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-    const verifyAccess = async () => {
-      if (checkExistingErpAuth()) {
-        try {
-          localStorage.setItem(DEVICE_AUTH_KEY, "1");
-        } catch {}
-        if (active) setAuthState("allowed");
+      if (error) {
+        setErrorMsg(`Supabase notice: ${error.message}`);
+        setPayments(localRows);
         return;
       }
 
-      try {
-        const { data } = await supabase.auth.getSession();
-        if (!active) return;
+      const dbRows: SitePaymentRow[] = Array.isArray(data)
+        ? (data as SitePaymentRow[]).map((r) => ({ ...r, synced: true }))
+        : [];
 
-        if (data.session) {
-          try {
-            localStorage.setItem(DEVICE_AUTH_KEY, "1");
-          } catch {}
-          setAuthState("allowed");
-        } else {
-          setAuthState("locked");
-        }
-      } catch {
-        if (!active) return;
-        setAuthState("locked");
-      }
-    };
-
-    verifyAccess();
-
-    return () => {
-      active = false;
-    };
+      const unsyncedLocal = localRows.filter((r) => r.synced === false);
+      const merged = [...unsyncedLocal, ...dbRows];
+      setPayments(merged);
+      saveLocalPayments(merged);
+    } catch {
+      setPayments(localRows);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    if (authState !== "allowed") return;
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) setEntries(parsed);
-      }
-    } catch (e) {
-      console.error("Failed to read local site payments:", e);
-    }
-    setIsLoaded(true);
-  }, [authState]);
+    setRole(getClientErpRole());
+    setIsOnline(typeof navigator !== 'undefined' ? navigator.onLine : true);
+    syncPayments();
 
-  useEffect(() => {
-    if (authState !== "allowed" || !isLoaded) return;
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
-    } catch (e) {
-      console.error("Failed to save local site payments:", e);
-    }
-  }, [entries, authState, isLoaded]);
+    const onOnline = () => {
+      setIsOnline(true);
+      syncPayments();
+    };
+    const onOffline = () => setIsOnline(false);
 
-  const handleLockDevice = async () => {
-    try {
-      localStorage.removeItem(DEVICE_AUTH_KEY);
-      await supabase.auth.signOut();
-    } catch {}
-    setAuthState("locked");
-  };
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
+  }, [syncPayments]);
 
-  const savedSites = useMemo(() => {
-    const unique = Array.from(new Set(entries.map((e) => e.project_site.trim()).filter(Boolean)));
-    return unique.slice(0, 8);
-  }, [entries]);
-
-  const savedPayees = useMemo(() => {
-    const unique = Array.from(new Set(entries.map((e) => e.payee_name.trim()).filter(Boolean)));
-    return unique.slice(0, 8);
-  }, [entries]);
-
-  const pendingSyncEntries = useMemo(
-    () => entries.filter((e) => !e.synced_to_supabase),
-    [entries]
-  );
-
-  const todayTotal = useMemo(() => {
-    const today = getTodayISO();
-    return entries
-      .filter((e) => e.entry_date === today)
-      .reduce((sum, item) => sum + Number(item.amount || 0), 0);
-  }, [entries]);
-
-  const filteredEntries = useMemo(() => {
-    if (filterSite === "ALL") return entries;
-    return entries.filter((e) => e.project_site === filterSite);
-  }, [entries, filterSite]);
-
-  const handleSaveEntry = async (e: React.FormEvent) => {
+  const handleAddPayment = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanSite = projectSite.trim();
+    setSubmitting(true);
+    setStatusMsg(null);
+    setErrorMsg(null);
+
+    const amtNum = Number(amount);
+    const cleanProject = projectName.trim();
     const cleanPayee = payeeName.trim();
-    const numericAmount = Number(amountInput.replace(/,/g, ""));
 
-    if (!cleanSite) {
-      showToast("Please enter Project / Site Name", "error");
-      return;
-    }
-    if (!cleanPayee) {
-      showToast("Please enter Labor / Staff / Vendor Name", "error");
-      return;
-    }
-    if (!numericAmount || numericAmount <= 0) {
-      showToast("Please enter valid Amount (₹)", "error");
+    if (!cleanProject || !cleanPayee || !Number.isFinite(amtNum) || amtNum <= 0) {
+      setErrorMsg('Please enter Project/Site, Payee Name, and a valid Amount greater than 0.');
+      setSubmitting(false);
       return;
     }
 
-    const newRecord: SitePaymentEntry = {
-      client_ref: `UE-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
-      entry_date: entryDate || getTodayISO(),
-      project_site: cleanSite,
+    const newEntry: SitePaymentRow = {
+      id: Date.now(),
+      project_name: cleanProject,
       category,
       payee_name: cleanPayee,
+      amount: amtNum,
       payment_mode: paymentMode,
-      amount: numericAmount,
-      remarks: remarks.trim(),
-      synced_to_supabase: false,
-      erp_posted: false,
+      payment_date: paymentDate || new Date().toISOString().slice(0, 10),
+      remarks: remarks.trim() || '-',
       created_at: new Date().toISOString(),
+      synced: false,
     };
 
-    setEntries((prev) => [newRecord, ...prev]);
-    setPayeeName("");
-    setAmountInput("");
-    setRemarks("");
-
-    if (typeof navigator !== "undefined" && navigator.onLine) {
-      try {
-        const { error } = await supabase.from("site_daily_payments").upsert(
-          {
-            client_ref: newRecord.client_ref,
-            entry_date: newRecord.entry_date,
-            project_site: newRecord.project_site,
-            category: newRecord.category,
-            payee_name: newRecord.payee_name,
-            payment_mode: newRecord.payment_mode,
-            amount: newRecord.amount,
-            remarks: newRecord.remarks || null,
-            erp_posted: false,
-          },
-          { onConflict: "client_ref" }
-        );
-
-        if (!error) {
-          setEntries((prev) =>
-            prev.map((item) =>
-              item.client_ref === newRecord.client_ref
-                ? { ...item, synced_to_supabase: true }
-                : item
-            )
-          );
-          showToast(`Saved & Synced to ERP (${formatINR(numericAmount)})`, "success");
-          return;
-        }
-      } catch {}
-    }
-
-    showToast(`Saved on Phone (${formatINR(numericAmount)}) — Ready to Sync`, "info");
-  };
-
-  const handleSyncAllToERP = async () => {
-    if (pendingSyncEntries.length === 0) {
-      showToast("All entries are already synced to ERP!", "info");
-      return;
-    }
-
-    setIsSyncing(true);
     try {
-      const payload = pendingSyncEntries.map((item) => ({
-        client_ref: item.client_ref,
-        entry_date: item.entry_date,
-        project_site: item.project_site,
-        category: item.category,
-        payee_name: item.payee_name,
-        payment_mode: item.payment_mode,
-        amount: item.amount,
-        remarks: item.remarks || null,
-        erp_posted: item.erp_posted,
-      }));
+      const { error } = await supabase.from('site_daily_payments').insert([
+        {
+          project_name: cleanProject,
+          category,
+          payee_name: cleanPayee,
+          amount: amtNum,
+          payment_mode: paymentMode,
+          payment_date: newEntry.payment_date,
+          remarks: newEntry.remarks,
+        },
+      ]);
 
-      const { error } = await supabase
-        .from("site_daily_payments")
-        .upsert(payload, { onConflict: "client_ref" });
+      try {
+        await supabase.from('erp_audit_logs').insert([
+          {
+            action: 'SITE_PAYMENT_LOGGED',
+            module: 'SITE_DAILY_PAYMENTS',
+            performed_by: `Role: ${role ?? 'Unauthenticated'}`,
+            role_used: role ?? 'SITE_ENGINEER',
+            details: `${cleanProject} | ${category} | ${cleanPayee} | ₹${amtNum} (${paymentMode})`,
+          },
+        ]);
+      } catch {}
 
-      if (error) throw error;
+      if (error) {
+        const nextList = [newEntry, ...payments];
+        setPayments(nextList);
+        saveLocalPayments(nextList);
+        setStatusMsg(`Saved locally (${formatINR(amtNum)}). Will sync when DB allows.`);
+      } else {
+        await syncPayments();
+        setStatusMsg(`Payment ${formatINR(amtNum)} synced to Supabase.`);
+      }
 
-      const syncedRefs = new Set(pendingSyncEntries.map((i) => i.client_ref));
-      setEntries((prev) =>
-        prev.map((item) =>
-          syncedRefs.has(item.client_ref) ? { ...item, synced_to_supabase: true } : item
-        )
-      );
-      showToast(`${pendingSyncEntries.length} entries synced to Universal Engicon ERP!`, "success");
-    } catch (err: unknown) {
-      const message =
+      setPayeeName('');
+      setAmount('');
+      setRemarks('');
+    } catch (err) {
+      const nextList = [newEntry, ...payments];
+      setPayments(nextList);
+      saveLocalPayments(nextList);
+      setErrorMsg(
         err instanceof Error
-          ? `${err.message} — Please Sign In once if RLS blocked sync.`
-          : "Sync failed. Please Sign In once and retry.";
-      showToast(message, "error");
+          ? `${err.message} — saved offline on device.`
+          : 'Saved offline on device.'
+      );
     } finally {
-      setIsSyncing(false);
+      setSubmitting(false);
     }
   };
 
-  const handleDeleteLocal = (clientRef: string) => {
-    setEntries((prev) => prev.filter((item) => item.client_ref !== clientRef));
-    showToast("Entry removed from phone log", "info");
-  };
-
-  const handleExportCSV = () => {
-    if (entries.length === 0) {
-      showToast("No entries available to export", "error");
-      return;
-    }
-    const headers = [
-      "entry_date",
-      "project_site",
-      "category",
-      "payee_name",
-      "payment_mode",
-      "amount",
-      "remarks",
-      "sync_status",
-    ];
-    const rows = entries.map((r) =>
-      [
-        r.entry_date,
-        `"${r.project_site.replace(/"/g, '""')}"`,
-        r.category,
-        `"${r.payee_name.replace(/"/g, '""')}"`,
-        r.payment_mode,
-        r.amount,
-        `"${(r.remarks || "").replace(/"/g, '""')}"`,
-        r.synced_to_supabase ? "SYNCED_TO_ERP" : "PENDING_SYNC",
-      ].join(",")
-    );
-    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows].join("\n");
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `UE_Site_Payments_${getTodayISO()}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  if (authState === "checking") {
-    return (
-      <div className="min-h-screen bg-[#F8F7F4] flex items-center justify-center p-4">
-        <div className="bg-white border border-slate-200 rounded-2xl px-6 py-5 text-center shadow-sm max-w-sm w-full">
-          <p className="text-xs font-bold uppercase tracking-wider text-[#0B1F3A]">
-            Universal Engicon Pvt. Ltd.
-          </p>
-          <p className="text-sm font-semibold text-slate-700 mt-1.5">Loading Site Payments...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (authState === "locked") {
-    return (
-      <div className="min-h-screen bg-[#F8F7F4] flex items-center justify-center p-4">
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 text-center shadow-sm max-w-sm w-full space-y-4">
-          <p className="text-xs font-bold uppercase tracking-widest text-[#C59B27]">
-            Universal Engicon Pvt. Ltd.
-          </p>
-          <h2 className="text-lg font-extrabold text-[#0B1F3A]">Sign In Required</h2>
-          <p className="text-xs text-slate-600">
-            Ek baar ERP mein sign in karein — uske baad is phone par dobara login nahi maangega.
-          </p>
-          <Link
-            href="/login"
-            className="block w-full py-3 rounded-xl bg-[#0B1F3A] text-[#E6C567] text-xs font-extrabold uppercase tracking-wide"
-          >
-            Go to Sign In Page
-          </Link>
-        </div>
-      </div>
-    );
-  }
+  const totalAmount = useMemo(
+    () => payments.reduce((sum, item) => sum + toNum(item.amount), 0),
+    [payments]
+  );
 
   return (
-    <div className="min-h-screen bg-[#F8F7F4] text-slate-900 pb-28">
-      <header className="sticky top-0 z-30 bg-[#0B1F3A] text-white shadow-md border-b-2 border-[#C59B27]">
-        <div className="max-w-lg mx-auto px-4 py-3 flex items-center justify-between gap-2">
+    <div className="min-h-screen bg-[#F8F7F4] text-slate-900 p-4 md:p-6">
+      <div className="max-w-5xl mx-auto space-y-5">
+        {/* Top Header */}
+        <div className="bg-[#0B1F3A] text-white rounded-2xl p-5 border-b-4 border-[#C59B27] shadow flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-[10px] tracking-widest uppercase text-[#E6C567] font-semibold">
-              Universal Engicon Pvt. Ltd.
+            <p className="text-[11px] uppercase tracking-widest text-[#E6C567] font-semibold">
+              Universal Engicon Pvt. Ltd. • UE Site Pay
             </p>
-            <h1 className="text-base font-bold leading-tight">Site Daily Payment Log</h1>
+            <h1 className="text-xl md:text-2xl font-bold mt-1">
+              Daily Site Payment Tracker
+            </h1>
+            <p className="text-xs text-slate-300 mt-1">
+              Role: <span className="text-[#E6C567] font-bold">{role ?? 'Active Session'}</span> •
+              Total Logged: <span className="text-white font-bold">{formatINR(totalAmount)}</span>
+            </p>
           </div>
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => setShowInstallGuide((prev) => !prev)}
-              className="px-2.5 py-1.5 rounded-lg bg-[#C59B27] text-[#0B1F3A] text-xs font-bold shadow active:scale-95 transition"
-            >
-              + Home Screen
-            </button>
-            <button
-              type="button"
-              onClick={handleLockDevice}
-              className="px-2.5 py-1.5 rounded-lg bg-white/10 text-slate-200 text-xs font-semibold hover:bg-white/20"
-            >
-              Lock
-            </button>
-          </div>
-        </div>
 
-        {showInstallGuide && (
-          <div className="bg-[#132C4E] border-t border-slate-700 px-4 py-3 text-xs text-slate-100 max-w-lg mx-auto space-y-1.5">
-            <div className="flex justify-between items-center">
-              <span className="font-bold text-[#E6C567]">Mobile Home Screen Par Lagayein:</span>
-              <button
-                type="button"
-                onClick={() => setShowInstallGuide(false)}
-                className="text-slate-300 underline"
-              >
-                Close
-              </button>
-            </div>
-            <p>
-              <strong>Android (Chrome):</strong> Top-right <strong>⋮ (3 dots)</strong> tap karein →{" "}
-              <strong>&quot;Add to Home screen&quot;</strong> → <strong>Add</strong>.
-            </p>
-            <p>
-              <strong>iPhone (Safari):</strong> Neeche <strong>Share (□↑)</strong> tap karein →{" "}
-              <strong>&quot;Add to Home Screen&quot;</strong> → <strong>Add</strong>.
-            </p>
-          </div>
-        )}
-
-        <div className="bg-[#10294B] px-4 py-2.5 border-t border-white/10">
-          <div className="max-w-lg mx-auto flex items-center justify-between gap-2">
-            <div>
-              <span className="text-[11px] text-slate-300 block">Today&apos;s Total</span>
-              <span className="text-sm font-extrabold text-white">{formatINR(todayTotal)}</span>
-            </div>
-            <button
-              type="button"
-              onClick={handleSyncAllToERP}
-              disabled={isSyncing}
-              className={`px-3.5 py-2 rounded-lg text-xs font-bold shadow-sm transition flex items-center gap-1.5 ${
-                pendingSyncEntries.length > 0
-                  ? "bg-amber-400 text-[#0B1F3A] hover:bg-amber-300"
-                  : "bg-emerald-600 text-white"
+          <div className="flex items-center gap-2">
+            <span
+              className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold ${
+                isOnline
+                  ? 'bg-emerald-500/20 text-emerald-200 border border-emerald-500/40'
+                  : 'bg-amber-500/20 text-amber-200 border border-amber-500/40'
               }`}
             >
-              {isSyncing
-                ? "Syncing..."
-                : pendingSyncEntries.length > 0
-                ? `Sync ${pendingSyncEntries.length} to ERP ↑`
-                : "All Synced to ERP ✓"}
+              {isOnline ? <Wifi className="w-3.5 h-3.5" /> : <WifiOff className="w-3.5 h-3.5" />}
+              {isOnline ? 'Online' : 'Offline'}
+            </span>
+
+            <button
+              type="button"
+              onClick={syncPayments}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#143159] hover:bg-[#1c4275] text-white border border-[#C59B27]/50 text-xs font-bold uppercase"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 text-[#E6C567] ${loading ? 'animate-spin' : ''}`} />
+              Sync
             </button>
+
+            <Link
+              href="/"
+              className="inline-flex items-center gap-1 px-3.5 py-2 rounded-xl bg-[#C59B27] hover:bg-[#d8ae37] text-[#0B1F3A] text-xs font-extrabold uppercase"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              Dashboard
+            </Link>
           </div>
         </div>
-      </header>
 
-      {toast && (
-        <div className="fixed top-28 left-1/2 -translate-x-1/2 z-50 w-[92%] max-w-md">
-          <div
-            className={`px-4 py-3 rounded-xl shadow-lg text-xs font-bold text-white text-center ${
-              toast.type === "error"
-                ? "bg-red-600"
-                : toast.type === "info"
-                ? "bg-[#0B1F3A] border border-[#C59B27]"
-                : "bg-emerald-700"
-            }`}
-          >
-            {toast.msg}
+        {/* Payment Form */}
+        <form
+          onSubmit={handleAddPayment}
+          className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4"
+        >
+          <div className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-[#0B1F3A]">
+            <Wallet className="w-4 h-4 text-[#C59B27]" />
+            Record Site Payment
           </div>
-        </div>
-      )}
 
-      <main className="max-w-lg mx-auto px-4 pt-4">
-        <div className="grid grid-cols-2 gap-2 bg-white p-1.5 rounded-xl border border-slate-200 shadow-sm mb-4">
-          <button
-            type="button"
-            onClick={() => setActiveTab("entry")}
-            className={`py-2.5 rounded-lg text-xs font-bold transition ${
-              activeTab === "entry"
-                ? "bg-[#0B1F3A] text-white shadow"
-                : "text-slate-600 hover:bg-slate-100"
-            }`}
-          >
-            + New Payment Entry
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("log")}
-            className={`py-2.5 rounded-lg text-xs font-bold transition ${
-              activeTab === "log"
-                ? "bg-[#0B1F3A] text-white shadow"
-                : "text-slate-600 hover:bg-slate-100"
-            }`}
-          >
-            Saved Log ({entries.length})
-          </button>
-        </div>
+          {statusMsg && (
+            <div className="flex items-center gap-2 p-3 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-semibold">
+              <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-700" />
+              <span>{statusMsg}</span>
+            </div>
+          )}
 
-        {activeTab === "entry" && (
-          <form
-            onSubmit={handleSaveEntry}
-            className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 space-y-4"
-          >
+          {errorMsg && (
+            <div className="flex items-center gap-2 p-3 rounded-xl bg-red-50 border border-red-300 text-red-900 text-xs font-semibold">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-red-700" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1">
-                Payment Date
+              <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
+                Project / Site Name *
               </label>
               <input
-                type="date"
-                value={entryDate}
-                onChange={(e) => setEntryDate(e.target.value)}
-                className="w-full rounded-xl border border-slate-300 bg-[#FAF9F6] px-3.5 py-2.5 text-sm font-semibold text-slate-900 focus:border-[#0B1F3A] focus:outline-none"
+                type="text"
                 required
+                value={projectName}
+                onChange={(e) => setProjectName(e.target.value)}
+                placeholder="e.g. Godrej Zen Estate Phase-2"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-[#F8F7F4] border border-slate-300 text-sm text-slate-900 focus:outline-none focus:border-[#0B1F3A]"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1">
-                Project / Site Name (Manual)
+              <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
+                Category *
+              </label>
+              <select
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl bg-[#F8F7F4] border border-slate-300 text-sm text-slate-900 focus:outline-none focus:border-[#0B1F3A]"
+              >
+                <option value="LABOR">LABOR</option>
+                <option value="STAFF">STAFF</option>
+                <option value="VENDOR">VENDOR</option>
+                <option value="PETTY_CASH">PETTY CASH</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
+                Payee Name *
               </label>
               <input
                 type="text"
-                placeholder="Type Project or Site Name..."
-                value={projectSite}
-                onChange={(e) => setProjectSite(e.target.value)}
-                className="w-full rounded-xl border border-slate-300 bg-[#FAF9F6] px-3.5 py-2.5 text-sm font-semibold text-slate-900 focus:border-[#0B1F3A] focus:outline-none"
                 required
-              />
-              {savedSites.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mt-2">
-                  {savedSites.map((site) => (
-                    <button
-                      key={site}
-                      type="button"
-                      onClick={() => setProjectSite(site)}
-                      className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border transition ${
-                        projectSite === site
-                          ? "bg-[#0B1F3A] text-white border-[#0B1F3A]"
-                          : "bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200"
-                      }`}
-                    >
-                      {site}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1.5">
-                Expense Category
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                {(["Labor", "Staff", "Vendor", "Petty Cash"] as PaymentCategory[]).map((cat) => (
-                  <button
-                    key={cat}
-                    type="button"
-                    onClick={() => setCategory(cat)}
-                    className={`py-3 px-3 rounded-xl text-xs font-bold border transition ${
-                      category === cat
-                        ? "bg-[#0B1F3A] text-[#E6C567] border-[#0B1F3A] shadow-sm"
-                        : "bg-[#FAF9F6] text-slate-700 border-slate-300 hover:bg-slate-100"
-                    }`}
-                  >
-                    {cat}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1">
-                {category} / Payee Name
-              </label>
-              <input
-                type="text"
-                placeholder={`Enter ${category} name...`}
                 value={payeeName}
                 onChange={(e) => setPayeeName(e.target.value)}
-                className="w-full rounded-xl border border-slate-300 bg-[#FAF9F6] px-3.5 py-2.5 text-sm font-semibold text-slate-900 focus:border-[#0B1F3A] focus:outline-none"
-                required
+                placeholder="Laborer, contractor, or vendor name"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-[#F8F7F4] border border-slate-300 text-sm text-slate-900 focus:outline-none focus:border-[#0B1F3A]"
               />
-              {savedPayees.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mt-2">
-                  {savedPayees.map((person) => (
-                    <button
-                      key={person}
-                      type="button"
-                      onClick={() => setPayeeName(person)}
-                      className="px-2.5 py-1 rounded-full text-[11px] font-medium bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200"
-                    >
-                      {person}
-                    </button>
-                  ))}
-                </div>
-              )}
             </div>
+          </div>
 
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1.5">
-                Payment Mode
-              </label>
-              <div className="grid grid-cols-4 gap-1.5">
-                {(["UPI", "Cash", "NEFT", "Cheque"] as PaymentMode[]).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => setPaymentMode(mode)}
-                    className={`py-2.5 rounded-xl text-xs font-bold border transition ${
-                      paymentMode === mode
-                        ? "bg-[#C59B27] text-[#0B1F3A] border-[#C59B27] shadow-sm"
-                        : "bg-[#FAF9F6] text-slate-700 border-slate-300"
-                    }`}
-                  >
-                    {mode}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1">
-                Amount (₹)
+              <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
+                Amount (₹) *
               </label>
               <input
                 type="number"
-                inputMode="decimal"
-                placeholder="0"
-                value={amountInput}
-                onChange={(e) => setAmountInput(e.target.value)}
-                className="w-full rounded-xl border-2 border-[#0B1F3A]/30 bg-[#FAF9F6] px-3.5 py-3 text-xl font-extrabold text-[#0B1F3A] focus:border-[#0B1F3A] focus:outline-none"
+                step="any"
+                min="1"
                 required
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="0.00"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-[#F8F7F4] border border-slate-300 text-sm text-slate-900 focus:outline-none focus:border-[#0B1F3A]"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1">
-                Work / Material Remarks (Optional)
+              <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
+                Payment Mode
+              </label>
+              <select
+                value={paymentMode}
+                onChange={(e) => setPaymentMode(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl bg-[#F8F7F4] border border-slate-300 text-sm text-slate-900 focus:outline-none focus:border-[#0B1F3A]"
+              >
+                <option value="UPI">UPI</option>
+                <option value="CASH">CASH</option>
+                <option value="NEFT">NEFT</option>
+                <option value="CHEQUE">CHEQUE</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
+                Date
               </label>
               <input
-                type="text"
-                placeholder="e.g., Mason haziri, Sand unloading, Site tea..."
-                value={remarks}
-                onChange={(e) => setRemarks(e.target.value)}
-                className="w-full rounded-xl border border-slate-300 bg-[#FAF9F6] px-3.5 py-2.5 text-sm text-slate-900 focus:border-[#0B1F3A] focus:outline-none"
+                type="date"
+                value={paymentDate}
+                onChange={(e) => setPaymentDate(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl bg-[#F8F7F4] border border-slate-300 text-sm text-slate-900 focus:outline-none focus:border-[#0B1F3A]"
               />
             </div>
 
-            <button
-              type="submit"
-              className="w-full py-3.5 rounded-xl bg-[#0B1F3A] hover:bg-[#143159] text-[#E6C567] font-extrabold text-sm tracking-wide shadow-md active:scale-[0.99] transition"
-            >
-              SAVE PAYMENT ENTRY
-            </button>
-          </form>
-        )}
-
-        {activeTab === "log" && (
-          <div className="space-y-3">
-            <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-wrap items-center justify-between gap-2">
-              <select
-                value={filterSite}
-                onChange={(e) => setFilterSite(e.target.value)}
-                className="rounded-lg border border-slate-300 bg-[#FAF9F6] px-2.5 py-1.5 text-xs font-bold text-slate-800"
-              >
-                <option value="ALL">All Projects ({entries.length})</option>
-                {savedSites.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
-
-              <button
-                type="button"
-                onClick={handleExportCSV}
-                className="px-3 py-1.5 rounded-lg bg-slate-800 text-white text-xs font-bold hover:bg-slate-700"
-              >
-                Export CSV
-              </button>
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
+                Remarks
+              </label>
+              <input
+                type="text"
+                value={remarks}
+                onChange={(e) => setRemarks(e.target.value)}
+                placeholder="Work / voucher note"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-[#F8F7F4] border border-slate-300 text-sm text-slate-900 focus:outline-none focus:border-[#0B1F3A]"
+              />
             </div>
-
-            {filteredEntries.length === 0 ? (
-              <div className="bg-white rounded-2xl border border-dashed border-slate-300 p-8 text-center">
-                <p className="text-sm font-bold text-slate-700">No payments saved yet</p>
-                <p className="text-xs text-slate-500 mt-1">
-                  Switch to &quot;+ New Payment Entry&quot; to log daily labor, staff, or vendor
-                  payments.
-                </p>
-              </div>
-            ) : (
-              filteredEntries.map((item) => (
-                <div
-                  key={item.client_ref}
-                  className="bg-white rounded-xl border border-slate-200 p-3.5 shadow-sm space-y-2"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <span className="inline-block px-2 py-0.5 rounded bg-[#0B1F3A]/10 text-[#0B1F3A] text-[10px] font-extrabold uppercase">
-                        {item.project_site}
-                      </span>
-                      <h3 className="text-sm font-bold text-slate-900 mt-1">{item.payee_name}</h3>
-                      <p className="text-[11px] text-slate-500">
-                        {item.entry_date} • {item.category} • {item.payment_mode}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-base font-extrabold text-[#0B1F3A]">
-                        {formatINR(item.amount)}
-                      </p>
-                      <span
-                        className={`inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          item.synced_to_supabase
-                            ? "bg-emerald-100 text-emerald-800"
-                            : "bg-amber-100 text-amber-800"
-                        }`}
-                      >
-                        {item.synced_to_supabase ? "Synced in ERP ✓" : "Pending Sync"}
-                      </span>
-                    </div>
-                  </div>
-
-                  {item.remarks && (
-                    <p className="text-xs text-slate-600 bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-100">
-                      {item.remarks}
-                    </p>
-                  )}
-
-                  <div className="flex justify-end pt-1 border-t border-slate-100">
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteLocal(item.client_ref)}
-                      className="text-[11px] font-semibold text-red-600 hover:underline"
-                    >
-                      Remove Local Copy
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
           </div>
-        )}
-      </main>
+
+          <button
+            type="submit"
+            disabled={submitting}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#0B1F3A] hover:bg-[#143159] disabled:opacity-50 text-white font-extrabold text-sm shadow transition"
+          >
+            <PlusCircle className="w-4 h-4 text-[#E6C567]" />
+            {submitting ? 'Saving...' : 'Save Site Payment'}
+          </button>
+        </form>
+
+        {/* Entries List */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-3">
+          <h2 className="text-sm font-extrabold uppercase tracking-wider text-[#0B1F3A]">
+            Recent Site Payments ({payments.length})
+          </h2>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="bg-[#F8F7F4] text-slate-600 uppercase border-b border-slate-200">
+                  <th className="py-2.5 px-3">Date</th>
+                  <th className="py-2.5 px-3">Project / Site</th>
+                  <th className="py-2.5 px-3">Payee &amp; Category</th>
+                  <th className="py-2.5 px-3">Mode</th>
+                  <th className="py-2.5 px-3 text-right">Amount</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {payments.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-6 text-center text-slate-500">
+                      {loading ? 'Loading payments...' : 'No site payments recorded yet.'}
+                    </td>
+                  </tr>
+                ) : (
+                  payments.map((row) => (
+                    <tr key={String(row.id)} className="hover:bg-slate-50">
+                      <td className="py-2.5 px-3 text-slate-700">{row.payment_date || '-'}</td>
+                      <td className="py-2.5 px-3 font-bold text-[#0B1F3A]">
+                        {row.project_name || '-'}
+                      </td>
+                      <td className="py-2.5 px-3 text-slate-700">
+                        <span className="font-semibold">{row.payee_name || '-'}</span> •{' '}
+                        {row.category || '-'}
+                      </td>
+                      <td className="py-2.5 px-3 text-slate-700">{row.payment_mode || '-'}</td>
+                      <td className="py-2.5 px-3 text-right font-extrabold text-[#0B1F3A]">
+                        {formatINR(toNum(row.amount))}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
