@@ -1,110 +1,38 @@
 ﻿"use client";
 
-import React, { useEffect, useState } from "react";
+import React from "react";
 import Link from "next/link";
-import { createClient, type AuthChangeEvent, type Session } from "@supabase/supabase-js";
-
-function getSupabaseClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-  return createClient(url, anonKey);
-}
-
-const supabase = getSupabaseClient();
 
 export default function HomePage() {
-  const [checking, setChecking] = useState<boolean>(true);
-  const [authenticated, setAuthenticated] = useState<boolean>(false);
-
-  useEffect(() => {
-    let active = true;
-
-    const goToLogin = () => {
-      if (typeof window !== "undefined") {
-        window.location.replace("/login");
-      }
-    };
-
-    const verifyUser = async () => {
-      try {
-        const { data } = await supabase.auth.getSession();
-        if (!active) return;
-
-        if (!data.session) {
-          setAuthenticated(false);
-          setChecking(false);
-          goToLogin();
-          return;
-        }
-
-        setAuthenticated(true);
-        setChecking(false);
-      } catch {
-        if (!active) return;
-        setAuthenticated(false);
-        setChecking(false);
-        goToLogin();
-      }
-    };
-
-    verifyUser();
-
-    const { data: listener } = supabase.auth.onAuthStateChange(
-      (_event: AuthChangeEvent, session: Session | null) => {
-        if (!active) return;
-        if (!session) {
-          setAuthenticated(false);
-          setChecking(false);
-          goToLogin();
-        } else {
-          setAuthenticated(true);
-          setChecking(false);
-        }
-      }
-    );
-
-    return () => {
-      active = false;
-      listener.subscription.unsubscribe();
-    };
-  }, []);
-
-  if (checking || !authenticated) {
-    return (
-      <div className="min-h-screen bg-[#F8F7F4] flex items-center justify-center p-4">
-        <div className="bg-white border border-slate-200 rounded-2xl px-6 py-5 text-center shadow-sm max-w-sm w-full">
-          <p className="text-xs font-bold uppercase tracking-wider text-[#0B1F3A]">
-            Universal Engicon Pvt. Ltd.
-          </p>
-          <p className="text-sm font-semibold text-slate-700 mt-1.5">
-            Opening Sign In...
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-[#F8F7F4] text-slate-900 p-4 md:p-6">
-      <div className="max-w-4xl mx-auto space-y-5">
-        <div className="bg-[#0B1F3A] text-white rounded-2xl p-5 border-b-4 border-[#C59B27] shadow">
-          <p className="text-[11px] uppercase tracking-widest text-[#E6C567] font-semibold">
-            Universal Engicon Pvt. Ltd.
-          </p>
-          <h1 className="text-xl font-bold mt-1">Enterprise ERP Dashboard</h1>
-          <p className="text-xs text-slate-300 mt-1">
-            Logged in. Open Site Daily Payments or select an ERP module.
-          </p>
+      <div className="max-w-5xl mx-auto space-y-5">
+        <div className="bg-[#0B1F3A] text-white rounded-2xl p-5 border-b-4 border-[#C59B27] shadow flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-[11px] uppercase tracking-widest text-[#E6C567] font-semibold">
+              Universal Engicon Pvt. Ltd.
+            </p>
+            <h1 className="text-xl font-bold mt-1">Executive ERP Command Center</h1>
+            <p className="text-xs text-slate-300 mt-1">
+              Select a module below or use the sidebar menu to navigate.
+            </p>
+          </div>
+          <Link
+            href="/login"
+            className="px-4 py-2 rounded-xl bg-[#C59B27] text-[#0B1F3A] text-xs font-extrabold uppercase tracking-wide"
+          >
+            MD / Staff Sign In
+          </Link>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
           <Link
             href="/site-payments"
             className="bg-[#0B1F3A] text-white border-2 border-[#C59B27] rounded-xl p-4 shadow-sm hover:bg-[#143159] transition"
           >
-            <p className="text-xs font-bold text-[#E6C567] uppercase">Mobile Entry</p>
-            <p className="text-sm font-extrabold text-white mt-1">Site Daily Payments</p>
-            <p className="text-[11px] text-slate-300 mt-1">Offline log &amp; ERP sync</p>
+            <p className="text-xs font-bold text-[#E6C567] uppercase">Mobile Site Entry</p>
+            <p className="text-base font-extrabold text-white mt-1">Site Daily Payments</p>
+            <p className="text-xs text-slate-300 mt-1">Offline labor, staff &amp; vendor payment log</p>
           </Link>
 
           <Link
@@ -112,7 +40,8 @@ export default function HomePage() {
             className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:border-[#0B1F3A] transition"
           >
             <p className="text-xs font-bold text-slate-500 uppercase">Procurement</p>
-            <p className="text-sm font-extrabold text-[#0B1F3A] mt-1">Material Requests</p>
+            <p className="text-base font-extrabold text-[#0B1F3A] mt-1">Material Requests (MR)</p>
+            <p className="text-xs text-slate-600 mt-1">Site indenting &amp; approval workflow</p>
           </Link>
 
           <Link
@@ -120,7 +49,8 @@ export default function HomePage() {
             className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:border-[#0B1F3A] transition"
           >
             <p className="text-xs font-bold text-slate-500 uppercase">Procurement</p>
-            <p className="text-sm font-extrabold text-[#0B1F3A] mt-1">Purchase Orders</p>
+            <p className="text-base font-extrabold text-[#0B1F3A] mt-1">Purchase Orders (PO)</p>
+            <p className="text-xs text-slate-600 mt-1">Vendor procurement &amp; GST orders</p>
           </Link>
 
           <Link
@@ -128,7 +58,17 @@ export default function HomePage() {
             className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:border-[#0B1F3A] transition"
           >
             <p className="text-xs font-bold text-slate-500 uppercase">Store</p>
-            <p className="text-sm font-extrabold text-[#0B1F3A] mt-1">Inventory &amp; GRN</p>
+            <p className="text-base font-extrabold text-[#0B1F3A] mt-1">Store Inventory &amp; GRN</p>
+            <p className="text-xs text-slate-600 mt-1">Material stock &amp; site inward</p>
+          </Link>
+
+          <Link
+            href="/mb-bills"
+            className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:border-[#0B1F3A] transition"
+          >
+            <p className="text-xs font-bold text-slate-500 uppercase">Billing</p>
+            <p className="text-base font-extrabold text-[#0B1F3A] mt-1">Contractor Bills &amp; MB</p>
+            <p className="text-xs text-slate-600 mt-1">Measurement books &amp; RA billing</p>
           </Link>
 
           <Link
@@ -136,15 +76,8 @@ export default function HomePage() {
             className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:border-[#0B1F3A] transition"
           >
             <p className="text-xs font-bold text-slate-500 uppercase">Real Estate</p>
-            <p className="text-sm font-extrabold text-[#0B1F3A] mt-1">Unit Matrix &amp; Sales</p>
-          </Link>
-
-          <Link
-            href="/reports"
-            className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:border-[#0B1F3A] transition"
-          >
-            <p className="text-xs font-bold text-slate-500 uppercase">Analytics</p>
-            <p className="text-sm font-extrabold text-[#0B1F3A] mt-1">Reports &amp; Ledger</p>
+            <p className="text-base font-extrabold text-[#0B1F3A] mt-1">Unit Matrix &amp; Sales</p>
+            <p className="text-xs text-slate-600 mt-1">Bookings, receipts &amp; CLP milestones</p>
           </Link>
         </div>
       </div>

@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
-import { createClient, type AuthChangeEvent, type Session } from "@supabase/supabase-js";
+import Link from "next/link";
+import { createClient } from "@supabase/supabase-js";
 
 type PaymentCategory = "Labor" | "Staff" | "Vendor" | "Petty Cash";
 type PaymentMode = "UPI" | "Cash" | "NEFT" | "Cheque";
@@ -45,9 +46,17 @@ function getTodayISO(): string {
   return local.toISOString().split("T")[0];
 }
 
+function hasErpLoginCookie(): boolean {
+  if (typeof document === "undefined") return false;
+  return (
+    document.cookie.includes("erp_role=") ||
+    Boolean(localStorage.getItem("erp_role")) ||
+    Boolean(localStorage.getItem("ue_user_role"))
+  );
+}
+
 export default function SitePaymentsMobilePage() {
-  const [authChecking, setAuthChecking] = useState<boolean>(true);
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [authState, setAuthState] = useState<"checking" | "allowed" | "locked">("checking");
 
   const [activeTab, setActiveTab] = useState<"entry" | "log">("entry");
   const [entries, setEntries] = useState<SitePaymentEntry[]>([]);
@@ -76,58 +85,31 @@ export default function SitePaymentsMobilePage() {
   useEffect(() => {
     let active = true;
 
-    const redirectToLogin = () => {
-      if (typeof window !== "undefined") {
-        window.location.replace("/login?next=/site-payments");
-      }
-    };
-
-    const checkSession = async () => {
+    const verifyAccess = async () => {
       try {
         const { data } = await supabase.auth.getSession();
         if (!active) return;
 
-        if (!data.session) {
-          setIsAuthenticated(false);
-          setAuthChecking(false);
-          redirectToLogin();
-          return;
+        if (data.session || hasErpLoginCookie()) {
+          setAuthState("allowed");
+        } else {
+          setAuthState("locked");
         }
-
-        setIsAuthenticated(true);
-        setAuthChecking(false);
       } catch {
         if (!active) return;
-        setIsAuthenticated(false);
-        setAuthChecking(false);
-        redirectToLogin();
+        setAuthState(hasErpLoginCookie() ? "allowed" : "locked");
       }
     };
 
-    checkSession();
-
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      (_event: AuthChangeEvent, session: Session | null) => {
-        if (!active) return;
-        if (!session) {
-          setIsAuthenticated(false);
-          setAuthChecking(false);
-          redirectToLogin();
-        } else {
-          setIsAuthenticated(true);
-          setAuthChecking(false);
-        }
-      }
-    );
+    verifyAccess();
 
     return () => {
       active = false;
-      authListener.subscription.unsubscribe();
     };
   }, []);
 
   useEffect(() => {
-    if (!isAuthenticated) return;
+    if (authState !== "allowed") return;
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
@@ -138,16 +120,16 @@ export default function SitePaymentsMobilePage() {
       console.error("Failed to read local site payments:", e);
     }
     setIsLoaded(true);
-  }, [isAuthenticated]);
+  }, [authState]);
 
   useEffect(() => {
-    if (!isAuthenticated || !isLoaded) return;
+    if (authState !== "allowed" || !isLoaded) return;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
     } catch (e) {
       console.error("Failed to save local site payments:", e);
     }
-  }, [entries, isAuthenticated, isLoaded]);
+  }, [entries, authState, isLoaded]);
 
   const savedSites = useMemo(() => {
     const unique = Array.from(new Set(entries.map((e) => e.project_site.trim()).filter(Boolean)));
@@ -258,14 +240,6 @@ export default function SitePaymentsMobilePage() {
 
     setIsSyncing(true);
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData.session) {
-        if (typeof window !== "undefined") {
-          window.location.replace("/login?next=/site-payments");
-        }
-        return;
-      }
-
       const payload = pendingSyncEntries.map((item) => ({
         client_ref: item.client_ref,
         entry_date: item.entry_date,
@@ -341,16 +315,36 @@ export default function SitePaymentsMobilePage() {
     document.body.removeChild(link);
   };
 
-  if (authChecking || !isAuthenticated) {
+  if (authState === "checking") {
     return (
       <div className="min-h-screen bg-[#F8F7F4] flex items-center justify-center p-4">
         <div className="bg-white border border-slate-200 rounded-2xl px-6 py-5 text-center shadow-sm max-w-sm w-full">
           <p className="text-xs font-bold uppercase tracking-wider text-[#0B1F3A]">
             Universal Engicon Pvt. Ltd.
           </p>
-          <p className="text-sm font-semibold text-slate-700 mt-1.5">
-            Redirecting to Sign In...
+          <p className="text-sm font-semibold text-slate-700 mt-1.5">Loading Site Payments...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (authState === "locked") {
+    return (
+      <div className="min-h-screen bg-[#F8F7F4] flex items-center justify-center p-4">
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 text-center shadow-sm max-w-sm w-full space-y-4">
+          <p className="text-xs font-bold uppercase tracking-widest text-[#C59B27]">
+            Universal Engicon Pvt. Ltd.
           </p>
+          <h2 className="text-lg font-extrabold text-[#0B1F3A]">Sign In Required</h2>
+          <p className="text-xs text-slate-600">
+            Site Daily Payment Log open karne ke liye pehle ERP mein sign in karein.
+          </p>
+          <Link
+            href="/login"
+            className="block w-full py-3 rounded-xl bg-[#0B1F3A] text-[#E6C567] text-xs font-extrabold uppercase tracking-wide"
+          >
+            Go to Sign In Page
+          </Link>
         </div>
       </div>
     );
