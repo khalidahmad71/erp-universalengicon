@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import {
   ClipboardList,
   PlusCircle,
@@ -41,6 +42,7 @@ interface MaterialRequestRow {
 }
 
 const MR_LOCAL_STORAGE_KEY = 'ue_material_requests_cache_v1';
+const PROJECTS_LOCAL_KEY = 'ue_projects_master_v1';
 
 function getProjectLabel(p?: ProjectOption | null): string {
   if (!p) return '';
@@ -115,6 +117,9 @@ export default function MaterialRequestsPage() {
   const [neededBy, setNeededBy] = useState<string>('');
   const [remarks, setRemarks] = useState<string>('');
 
+  const [showQuickProjectBox, setShowQuickProjectBox] = useState<boolean>(false);
+  const [quickProjectName, setQuickProjectName] = useState<string>('');
+
   const generateMrNo = () => {
     const stamp = new Date().toISOString().slice(2, 10).replace(/-/g, '');
     const rand = Math.floor(100 + Math.random() * 900);
@@ -138,6 +143,17 @@ export default function MaterialRequestsPage() {
     }
   };
 
+  const readLocalProjects = (): ProjectOption[] => {
+    try {
+      const raw = localStorage.getItem(PROJECTS_LOCAL_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? (parsed as ProjectOption[]) : [];
+    } catch {
+      return [];
+    }
+  };
+
   const projectLookup = useMemo(() => {
     const map = new Map<string, string>();
     for (const p of projects) {
@@ -152,13 +168,15 @@ export default function MaterialRequestsPage() {
   const loadEmptyOrLiveData = async () => {
     setLoading(true);
     setErrorMsg(null);
+    const localProjects = readLocalProjects();
     try {
       const { data: projData, error: projErr } = await supabase
         .from('projects')
         .select('*');
 
-      const loadedProjects: ProjectOption[] =
+      const dbProjects: ProjectOption[] =
         !projErr && Array.isArray(projData) ? (projData as ProjectOption[]) : [];
+      const loadedProjects = dbProjects.length > 0 ? dbProjects : localProjects;
       setProjects(loadedProjects);
 
       const lookup = new Map<string, string>();
@@ -213,7 +231,7 @@ export default function MaterialRequestsPage() {
         }
       }
     } catch {
-      setProjects([]);
+      setProjects(localProjects);
       setMrs(readLocalCache());
     } finally {
       setLoading(false);
@@ -225,6 +243,41 @@ export default function MaterialRequestsPage() {
     setMrNo(generateMrNo());
     loadEmptyOrLiveData();
   }, []);
+
+  const handleQuickAddProject = async () => {
+    const cleanName = quickProjectName.trim();
+    if (!cleanName) return;
+
+    const newProj: ProjectOption = {
+      id: Date.now(),
+      name: cleanName,
+      project_name: cleanName,
+      site_name: cleanName,
+    };
+
+    const nextProjects = [newProj, ...projects];
+    setProjects(nextProjects);
+    setSelectedProject(cleanName);
+    setQuickProjectName('');
+    setShowQuickProjectBox(false);
+    setStatusMsg(`New project "${cleanName}" added and selected.`);
+
+    try {
+      const existingLocal = readLocalProjects();
+      localStorage.setItem(PROJECTS_LOCAL_KEY, JSON.stringify([newProj, ...existingLocal]));
+    } catch {}
+
+    try {
+      const { error } = await supabase
+        .from('projects')
+        .insert([{ name: cleanName, site_name: cleanName, status: 'ACTIVE' }]);
+      if (error) {
+        await supabase
+          .from('projects')
+          .insert([{ project_name: cleanName, status: 'ACTIVE' }]);
+      }
+    } catch {}
+  };
 
   const projectSuggestions = useMemo(() => {
     const set = new Set<string>();
@@ -367,7 +420,7 @@ export default function MaterialRequestsPage() {
           <div>
             <div className="flex items-center gap-2 text-amber-400 text-xs font-bold uppercase tracking-widest">
               <ClipboardList className="w-4 h-4" />
-              Material Indent & Requisition
+              Material Indent &amp; Requisition
             </div>
             <h1 className="text-2xl font-extrabold text-white tracking-tight mt-0.5">
               Material Requests (MR) — UNIVERSAL ENGICON PVT. LTD.
@@ -380,14 +433,23 @@ export default function MaterialRequestsPage() {
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={loadEmptyOrLiveData}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 text-xs font-bold uppercase tracking-wider transition-all self-start sm:self-auto"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href="/projects"
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-extrabold uppercase tracking-wider transition-all"
+            >
+              <PlusCircle className="w-4 h-4" />
+              + Add New Project
+            </Link>
+            <button
+              type="button"
+              onClick={loadEmptyOrLiveData}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 text-xs font-bold uppercase tracking-wider transition-all"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+          </div>
         </div>
 
         {/* Selected MR -> Indenting Project / Site Display */}
@@ -402,7 +464,7 @@ export default function MaterialRequestsPage() {
             <p className="text-xs text-slate-400 mt-0.5">
               {activeMr
                 ? `Selected MR: ${activeMr.mr_no ?? activeMr.mr_number ?? `#${activeMr.id}`}`
-                : 'Enter a project below or select an MR row after creating one'}
+                : 'Enter or add a project below, then submit your MR'}
             </p>
           </div>
 
@@ -460,18 +522,48 @@ export default function MaterialRequestsPage() {
             </div>
 
             <div>
-              <label className="block text-xs font-bold uppercase text-slate-300 mb-1.5">
-                Project / Site Name
-              </label>
-              <input
-                type="text"
-                list="erp-projects-list"
-                required
-                value={selectedProject}
-                onChange={(e) => setSelectedProject(e.target.value)}
-                placeholder="Enter or select project/site"
-                className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-700 text-sm text-white focus:outline-none focus:border-amber-400"
-              />
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-bold uppercase text-slate-300">
+                  Project / Site Name
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setShowQuickProjectBox((prev) => !prev)}
+                  className="text-[11px] font-bold text-amber-400 hover:underline"
+                >
+                  {showQuickProjectBox ? 'Cancel' : '+ Quick Add Project'}
+                </button>
+              </div>
+
+              {showQuickProjectBox ? (
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={quickProjectName}
+                    onChange={(e) => setQuickProjectName(e.target.value)}
+                    placeholder="New project name..."
+                    className="flex-1 px-3 py-2.5 rounded-lg bg-slate-950 border border-amber-400 text-sm text-white focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleQuickAddProject}
+                    className="px-3 py-2.5 rounded-lg bg-amber-500 text-slate-950 text-xs font-extrabold"
+                  >
+                    Add
+                  </button>
+                </div>
+              ) : (
+                <input
+                  type="text"
+                  list="erp-projects-list"
+                  required
+                  value={selectedProject}
+                  onChange={(e) => setSelectedProject(e.target.value)}
+                  placeholder="Enter or select project/site"
+                  className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-700 text-sm text-white focus:outline-none focus:border-amber-400"
+                />
+              )}
+
               <datalist id="erp-projects-list">
                 {projectSuggestions.map((label) => (
                   <option key={label} value={label} />

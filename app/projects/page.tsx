@@ -1,38 +1,74 @@
-'use client';
+﻿'use client';
 
 import React, { useEffect, useState } from 'react';
-import { createClient } from '@supabase/supabase-js';
-import { Building2, Plus, MapPin, Trash2 } from 'lucide-react';
+import Link from 'next/link';
+import { Building2, PlusCircle, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 
-const supabase = createClient(
-  (process.env.NEXT_PUBLIC_SUPABASE_URL || "https://jvorxidiigvdznnpgxrj.supabase.co"),
-  (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "public-anon-key")
-);
+interface ProjectRow {
+  id: string | number;
+  project_name?: string | null;
+  name?: string | null;
+  site_name?: string | null;
+  location?: string | null;
+  client_name?: string | null;
+  status?: string | null;
+  created_at?: string | null;
+}
 
-interface ProjectItem {
-  id: number;
-  name: string;
-  location?: string;
-  budget: number;
-  status?: string;
+const PROJECTS_LOCAL_KEY = 'ue_projects_master_v1';
+
+function readLocalProjects(): ProjectRow[] {
+  try {
+    const raw = localStorage.getItem(PROJECTS_LOCAL_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as ProjectRow[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalProjects(rows: ProjectRow[]) {
+  try {
+    localStorage.setItem(PROJECTS_LOCAL_KEY, JSON.stringify(rows));
+  } catch {}
 }
 
 export default function ProjectsMasterPage() {
-  const [projects, setProjects] = useState<ProjectItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [formData, setFormData] = useState({
-    name: '',
-    location: 'Patna, Bihar',
-    budget: 0,
-    status: 'ACTIVE',
-  });
+  const [projects, setProjects] = useState<ProjectRow[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [submitting, setSubmitting] = useState<boolean>(false);
+  const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const [projectName, setProjectName] = useState<string>('');
+  const [location, setLocation] = useState<string>('');
+  const [clientName, setClientName] = useState<string>('');
+  const [status, setStatus] = useState<string>('ACTIVE');
 
   const loadProjects = async () => {
     setLoading(true);
-    const { data } = await supabase.from('projects').select('*').order('id', { ascending: false });
-    if (data) setProjects(data as ProjectItem[]);
-    setLoading(false);
+    setErrorMsg(null);
+    const local = readLocalProjects();
+    try {
+      const { data, error } = await supabase
+        .from('projects')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!error && Array.isArray(data)) {
+        const rows = data as ProjectRow[];
+        setProjects(rows.length > 0 ? rows : local);
+        if (rows.length > 0) saveLocalProjects(rows);
+      } else {
+        setProjects(local);
+      }
+    } catch {
+      setProjects(local);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -41,158 +77,244 @@ export default function ProjectsMasterPage() {
 
   const handleAddProject = async (e: React.FormEvent) => {
     e.preventDefault();
-    const { error } = await supabase.from('projects').insert([
-      {
-        name: formData.name.trim(),
-        location: formData.location.trim(),
-        budget: Number(formData.budget),
-        status: formData.status,
-      },
-    ]);
+    setSubmitting(true);
+    setStatusMsg(null);
+    setErrorMsg(null);
 
-    if (error && error.message.includes('location')) {
-      await supabase.from('projects').insert([
-        {
-          name: formData.name.trim(),
-          budget: Number(formData.budget),
-          status: formData.status,
-        },
-      ]);
-    } else if (error) {
-      alert('Error adding project: ' + error.message);
+    const cleanName = projectName.trim();
+    if (!cleanName) {
+      setErrorMsg('Please enter Project / Site Name.');
+      setSubmitting(false);
       return;
     }
 
-    setShowModal(false);
-    setFormData({ name: '', location: 'Patna, Bihar', budget: 0, status: 'ACTIVE' });
-    loadProjects();
-  };
+    const newProj: ProjectRow = {
+      id: Date.now(),
+      project_name: cleanName,
+      name: cleanName,
+      site_name: cleanName,
+      location: location.trim() || '-',
+      client_name: clientName.trim() || 'Universal Engicon Pvt. Ltd.',
+      status,
+      created_at: new Date().toISOString(),
+    };
 
-  const handleDeleteProject = async (id: number) => {
-    if (!confirm('Are you sure you want to remove this project?')) return;
-    await supabase.from('projects').delete().eq('id', id);
-    loadProjects();
+    try {
+      let inserted = false;
+
+      const { error: err1 } = await supabase.from('projects').insert([
+        {
+          name: cleanName,
+          site_name: location.trim() || cleanName,
+          status,
+        },
+      ]);
+
+      if (!err1) {
+        inserted = true;
+      } else {
+        const { error: err2 } = await supabase.from('projects').insert([
+          {
+            project_name: cleanName,
+            location: location.trim() || null,
+            client_name: clientName.trim() || null,
+            status,
+          },
+        ]);
+        if (!err2) inserted = true;
+      }
+
+      const updatedLocal = [newProj, ...readLocalProjects()];
+      saveLocalProjects(updatedLocal);
+
+      if (inserted) {
+        await loadProjects();
+      } else {
+        setProjects(updatedLocal);
+      }
+
+      setStatusMsg(`Project "${cleanName}" added successfully!`);
+      setProjectName('');
+      setLocation('');
+      setClientName('');
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to save project.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 p-6 text-slate-900">
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-4">
-        <div>
-          <span className="text-xs font-bold tracking-wider text-blue-700 uppercase">
-            Universal Engicon Pvt. Ltd. â€¢ Project Portfolio
-          </span>
-          <h1 className="text-2xl font-extrabold text-slate-900">All Sites &amp; Projects Master</h1>
+    <div className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-8">
+      <div className="max-w-6xl mx-auto space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl">
+          <div>
+            <div className="flex items-center gap-2 text-amber-400 text-xs font-bold uppercase tracking-widest">
+              <Building2 className="w-4 h-4" />
+              Project &amp; Site Master
+            </div>
+            <h1 className="text-2xl font-extrabold text-white tracking-tight mt-0.5">
+              Projects &amp; Sites — UNIVERSAL ENGICON PVT. LTD.
+            </h1>
+            <p className="text-xs text-slate-400 mt-1">
+              Yahan se add kiye gaye sabhi Projects MR, PO, DPR, Store aur Site Payments mein dikhenge.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Link
+              href="/mr"
+              className="px-4 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-extrabold uppercase"
+            >
+              Go to MR Module
+            </Link>
+            <button
+              type="button"
+              onClick={loadProjects}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 text-xs font-bold uppercase"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+          </div>
         </div>
-        <button
-          onClick={() => setShowModal(true)}
-          className="inline-flex items-center gap-2 rounded-lg bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-800"
+
+        <form
+          onSubmit={handleAddProject}
+          className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl space-y-4"
         >
-          <Plus className="h-4 w-4" /> Add New Project
-        </button>
-      </div>
+          <h2 className="text-sm font-bold uppercase tracking-wider text-amber-400">
+            + Add New Project / Site
+          </h2>
 
-      {loading ? (
-        <div className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">
-          Loading projects...
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          {projects.map((proj) => (
-            <div key={proj.id} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <h2 className="font-bold text-slate-900">{proj.name}</h2>
-                  {proj.location && (
-                    <p className="mt-1 flex items-center gap-1 text-xs text-slate-500">
-                      <MapPin className="h-3.5 w-3.5" /> {proj.location}
-                    </p>
-                  )}
-                </div>
-                <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-700">
-                  {proj.status || 'ACTIVE'}
-                </span>
-              </div>
-
-              <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3">
-                <span className="font-mono text-sm font-bold text-blue-700">
-                  ₹ {Number(proj.budget || 0).toLocaleString('en-IN')}
-                </span>
-                <button
-                  onClick={() => handleDeleteProject(proj.id)}
-                  className="text-slate-400 hover:text-rose-600"
-                  title="Delete Project"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
+          {statusMsg && (
+            <div className="flex items-center gap-2 p-3 rounded-lg bg-emerald-950/70 border border-emerald-700 text-emerald-200 text-xs font-semibold">
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+              <span>{statusMsg}</span>
             </div>
-          ))}
-        </div>
-      )}
+          )}
 
-      {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <form onSubmit={handleAddProject} className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
-            <h2 className="mb-4 flex items-center gap-2 text-lg font-bold">
-              <Building2 className="h-5 w-5 text-blue-700" /> Add New Site / Project
-            </h2>
-            <div className="space-y-3 text-sm">
-              <div>
-                <label className="mb-1 block font-semibold">Project Name *</label>
-                <input
-                  required
-                  className="w-full rounded border p-2"
-                  placeholder="e.g. Universal Engicon Tower - Patna"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                />
-              </div>
-              <div>
-                <label className="mb-1 block font-semibold">Location</label>
-                <input
-                  className="w-full rounded border p-2"
-                  value={formData.location}
-                  onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                />
-              </div>
-              <div>
-                <label className="mb-1 block font-semibold">Contract Budget (₹) *</label>
-                <input
-                  type="number"
-                  required
-                  className="w-full rounded border p-2 font-mono font-bold"
-                  value={formData.budget}
-                  onChange={(e) => setFormData({ ...formData, budget: Number(e.target.value) })}
-                />
-              </div>
-              <div>
-                <label className="mb-1 block font-semibold">Status</label>
-                <select
-                  className="w-full rounded border p-2"
-                  value={formData.status}
-                  onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                >
-                  <option value="ACTIVE">ACTIVE</option>
-                  <option value="PLANNING">PLANNING</option>
-                  <option value="COMPLETED">COMPLETED</option>
-                </select>
-              </div>
+          {errorMsg && (
+            <div className="p-3 rounded-lg bg-red-950/70 border border-red-700 text-red-200 text-xs font-semibold">
+              {errorMsg}
             </div>
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setShowModal(false)}
-                className="rounded border px-4 py-2 text-sm"
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-300 mb-1.5">
+                Project / Site Name *
+              </label>
+              <input
+                type="text"
+                required
+                value={projectName}
+                onChange={(e) => setProjectName(e.target.value)}
+                placeholder="e.g. Godrej Zen Estate Phase-2"
+                className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-700 text-sm text-white focus:outline-none focus:border-amber-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-300 mb-1.5">
+                City / Site Location
+              </label>
+              <input
+                type="text"
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                placeholder="e.g. Patna / Kolkata / Lucknow"
+                className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-700 text-sm text-white focus:outline-none focus:border-amber-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-300 mb-1.5">
+                Client / Developer
+              </label>
+              <input
+                type="text"
+                value={clientName}
+                onChange={(e) => setClientName(e.target.value)}
+                placeholder="Client or Internal Real Estate"
+                className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-700 text-sm text-white focus:outline-none focus:border-amber-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-300 mb-1.5">
+                Status
+              </label>
+              <select
+                value={status}
+                onChange={(e) => setStatus(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-700 text-sm text-white focus:outline-none focus:border-amber-400"
               >
-                Cancel
-              </button>
-              <button type="submit" className="rounded bg-blue-700 px-4 py-2 text-sm font-semibold text-white">
-                Save Project
-              </button>
+                <option value="ACTIVE">ACTIVE</option>
+                <option value="PLANNING">PLANNING</option>
+                <option value="COMPLETED">COMPLETED</option>
+              </select>
             </div>
-          </form>
+          </div>
+
+          <button
+            type="submit"
+            disabled={submitting}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-extrabold text-sm shadow-lg transition-all"
+          >
+            <PlusCircle className="w-4 h-4" />
+            {submitting ? 'Saving Project...' : 'Save New Project'}
+          </button>
+        </form>
+
+        <div className="bg-slate-900 border border-slate-800 rounded-xl shadow-xl overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-800">
+            <h2 className="text-sm font-bold uppercase tracking-wider text-amber-400">
+              Active Projects ({projects.length})
+            </h2>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="bg-slate-950 text-slate-400 uppercase border-b border-slate-800">
+                  <th className="py-3 px-4">Project / Site Name</th>
+                  <th className="py-3 px-4">Location</th>
+                  <th className="py-3 px-4">Client</th>
+                  <th className="py-3 px-4">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800">
+                {projects.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="py-8 text-center text-slate-400">
+                      {loading
+                        ? 'Loading projects...'
+                        : 'No projects yet. Add your first project using the form above.'}
+                    </td>
+                  </tr>
+                ) : (
+                  projects.map((p) => {
+                    const title = p.project_name || p.name || p.site_name || `#${p.id}`;
+                    return (
+                      <tr key={String(p.id)} className="hover:bg-slate-800/40">
+                        <td className="py-3 px-4 font-bold text-amber-300">{title}</td>
+                        <td className="py-3 px-4 text-slate-300">{p.location || p.site_name || '-'}</td>
+                        <td className="py-3 px-4 text-slate-300">{p.client_name || '-'}</td>
+                        <td className="py-3 px-4">
+                          <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-bold">
+                            {p.status || 'ACTIVE'}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
