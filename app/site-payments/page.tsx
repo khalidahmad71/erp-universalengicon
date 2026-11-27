@@ -266,9 +266,7 @@ export default function SitePaymentsMobilePage() {
           showToast(`Saved & Synced to ERP (${formatINR(numericAmount)})`, "success");
           return;
         }
-      } catch {
-        // Fallback silently to offline saved state
-      }
+      } catch {}
     }
 
     showToast(`Saved on Phone (${formatINR(numericAmount)}) — Ready to Sync`, "info");
