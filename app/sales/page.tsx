@@ -94,9 +94,10 @@ function RealEstateSalesContent() {
 
   const [units, setUnits] = useState<RealEstateUnit[]>([]);
   const [receipts, setReceipts] = useState<CustomerReceipt[]>([]);
+  const [masterProjects, setMasterProjects] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [selectedProject, setSelectedProject] = useState<string>('Godrej Zen Estate Phase-2');
+  const [selectedProject, setSelectedProject] = useState<string>('');
   const [typeFilter, setTypeFilter] = useState<string>('ALL');
   const [shareFilter, setShareFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
@@ -132,7 +133,7 @@ function RealEstateSalesContent() {
 
   const fetchAllData = async () => {
     setLoading(true);
-    const [unitsRes, receiptsRes] = await Promise.all([
+    const [unitsRes, receiptsRes, projectsRes] = await Promise.all([
       supabase
         .from('real_estate_units')
         .select('*')
@@ -142,20 +143,40 @@ function RealEstateSalesContent() {
         .from('customer_receipts')
         .select('*')
         .order('created_at', { ascending: false }),
+      supabase.from('projects').select('*').order('created_at', { ascending: false }),
     ]);
+
+    const dbProjectNames: string[] = [];
+    if (!projectsRes.error && Array.isArray(projectsRes.data)) {
+      for (const p of projectsRes.data as Record<string, unknown>[]) {
+        const label = String(p.project_name ?? p.name ?? p.site_name ?? '').trim();
+        if (label) dbProjectNames.push(label);
+      }
+    }
+    setMasterProjects(Array.from(new Set(dbProjectNames)));
 
     if (!unitsRes.error && unitsRes.data) {
       setUnits(unitsRes.data);
-      const projects = Array.from(new Set(unitsRes.data.map((u) => u.project_name)));
-      if (projects.length > 0 && !projects.includes(selectedProject)) {
-        setSelectedProject(projects[0]);
+      const unitProjects = Array.from(
+        new Set(unitsRes.data.map((u) => u.project_name).filter(Boolean))
+      );
+      const combinedProjects = Array.from(new Set([...unitProjects, ...dbProjectNames]));
+
+      if (combinedProjects.length > 0 && (!selectedProject || !combinedProjects.includes(selectedProject))) {
+        setSelectedProject(combinedProjects[0]);
+      } else if (combinedProjects.length === 0) {
+        setSelectedProject('');
       }
+
       if (unitsRes.data.length > 0 && !recUnitNo) {
         const firstUnit = unitsRes.data[0];
         setRecUnitNo(firstUnit.unit_number);
         setRecCustomerName(firstUnit.customer_name || '');
       }
+    } else if (dbProjectNames.length > 0 && !selectedProject) {
+      setSelectedProject(dbProjectNames[0]);
     }
+
     if (!receiptsRes.error && receiptsRes.data) {
       setReceipts(receiptsRes.data);
     }
@@ -240,21 +261,25 @@ function RealEstateSalesContent() {
 
   const updateDraftUnit = (
     key: string,
-    patch: Partial<Pick<DraftGeneratedUnit, 'shareOwner' | 'unitType' | 'areaSqft' | 'totalPrice' | 'unitNumber'>>
+    patch: Partial<
+      Pick<DraftGeneratedUnit, 'shareOwner' | 'unitType' | 'areaSqft' | 'totalPrice' | 'unitNumber'>
+    >
   ) => {
     setDraftUnits((prev) => prev.map((item) => (item.key === key ? { ...item, ...patch } : item)));
   };
 
   const projectsList = useMemo(() => {
-    const list = Array.from(new Set(units.map((u) => u.project_name)));
-    return list.length > 0 ? list : ['Godrej Zen Estate Phase-2'];
-  }, [units]);
+    const unitProjects = units.map((u) => u.project_name).filter(Boolean);
+    return Array.from(new Set([...unitProjects, ...masterProjects]));
+  }, [units, masterProjects]);
 
   const projectUnits = useMemo(() => {
+    if (!selectedProject) return [];
     return units.filter((u) => u.project_name === selectedProject);
   }, [units, selectedProject]);
 
   const projectReceipts = useMemo(() => {
+    if (!selectedProject) return [];
     return receipts.filter((r) => r.project_name === selectedProject);
   }, [receipts, selectedProject]);
 
@@ -267,13 +292,19 @@ function RealEstateSalesContent() {
     const landownerUnits = projectUnits.filter((u) => u.share_owner === 'LANDOWNER').length;
 
     const flatsTotal = projectUnits.filter((u) => u.unit_type === 'Flat').length;
-    const flatsBooked = projectUnits.filter((u) => u.unit_type === 'Flat' && u.status === 'Booked').length;
+    const flatsBooked = projectUnits.filter(
+      (u) => u.unit_type === 'Flat' && u.status === 'Booked'
+    ).length;
 
     const shopsTotal = projectUnits.filter((u) => u.unit_type === 'Shop').length;
-    const shopsBooked = projectUnits.filter((u) => u.unit_type === 'Shop' && u.status === 'Booked').length;
+    const shopsBooked = projectUnits.filter(
+      (u) => u.unit_type === 'Shop' && u.status === 'Booked'
+    ).length;
 
     const officesTotal = projectUnits.filter((u) => u.unit_type === 'Office').length;
-    const officesBooked = projectUnits.filter((u) => u.unit_type === 'Office' && u.status === 'Booked').length;
+    const officesBooked = projectUnits.filter(
+      (u) => u.unit_type === 'Office' && u.status === 'Booked'
+    ).length;
 
     const totalRevenue = projectUnits
       .filter((u) => u.status === 'Booked')
@@ -423,7 +454,6 @@ function RealEstateSalesContent() {
 
     setSavingNewUnit(true);
 
-    // 1. Register project in projects master if not present
     try {
       await supabase.from('projects').insert([
         {
@@ -434,7 +464,6 @@ function RealEstateSalesContent() {
       ]);
     } catch {}
 
-    // 2. Build full payload with share_owner + balance_amount
     const fullRows = draftUnits.map((u) => ({
       project_name: cleanProjectName,
       floor_no: u.floorLabel,
@@ -450,7 +479,6 @@ function RealEstateSalesContent() {
 
     let { error } = await supabase.from('real_estate_units').insert(fullRows);
 
-    // Fallback if optional columns (balance_amount / share_owner) haven't been added to Supabase yet
     if (error && (error.message.includes('balance_amount') || error.message.includes('share_owner'))) {
       const baseRows = draftUnits.map((u) => ({
         project_name: cleanProjectName,
@@ -554,11 +582,15 @@ function RealEstateSalesContent() {
               onChange={(e) => setSelectedProject(e.target.value)}
               className="px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-bold text-slate-900 focus:bg-white focus:border-blue-700 focus:outline-none min-w-[230px]"
             >
-              {projectsList.map((proj) => (
-                <option key={proj} value={proj}>
-                  {proj}
-                </option>
-              ))}
+              {projectsList.length === 0 ? (
+                <option value="">-- No Project Yet --</option>
+              ) : (
+                projectsList.map((proj) => (
+                  <option key={proj} value={proj}>
+                    {proj}
+                  </option>
+                ))
+              )}
             </select>
           </div>
         </div>
@@ -871,7 +903,7 @@ function RealEstateSalesContent() {
                   <input
                     type="text"
                     required
-                    placeholder="e.g. Sahar Apartment / Godrej Zen Estate Phase-2"
+                    placeholder="Enter new project or apartment name"
                     value={newProject}
                     onChange={(e) => setNewProject(e.target.value)}
                     className="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl text-sm font-bold text-slate-900 focus:bg-white focus:border-blue-700 focus:outline-none"
@@ -1223,7 +1255,7 @@ function RealEstateSalesContent() {
             <div className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
               <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
                 <h3 className="text-sm font-extrabold text-slate-900">
-                  Recorded Payment Receipts ({selectedProject})
+                  Recorded Payment Receipts ({selectedProject || 'No Project'})
                 </h3>
                 <button
                   onClick={() => window.print()}
@@ -1250,7 +1282,7 @@ function RealEstateSalesContent() {
                     {projectReceipts.length === 0 ? (
                       <tr>
                         <td colSpan={6} className="py-12 text-center text-slate-500">
-                          No receipts recorded for {selectedProject} yet. Use the form above to generate one.
+                          No receipts recorded yet.
                         </td>
                       </tr>
                     ) : (
@@ -1287,7 +1319,8 @@ function RealEstateSalesContent() {
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
                 <span className="text-[11px] font-bold text-blue-700 uppercase tracking-wider">
-                  {activeUnit.project_name} • {activeUnit.floor_no} • {(activeUnit.share_owner || 'BUILDER')} SHARE
+                  {activeUnit.project_name} • {activeUnit.floor_no} •{' '}
+                  {(activeUnit.share_owner || 'BUILDER')} SHARE
                 </span>
                 <h3 className="text-lg font-extrabold text-slate-900">
                   Unit {activeUnit.unit_number} ({activeUnit.unit_type})
