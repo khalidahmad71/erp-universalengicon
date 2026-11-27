@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ClipboardList,
   PlusCircle,
@@ -17,12 +17,15 @@ interface ProjectOption {
   name?: string;
   project_name?: string;
   site_name?: string;
+  title?: string;
 }
 
 interface MaterialRequestRow {
   id: string | number;
   mr_no?: string;
   project_name?: string;
+  project_site?: string;
+  site_name?: string;
   material_name?: string;
   quantity?: number;
   unit?: string;
@@ -32,10 +35,30 @@ interface MaterialRequestRow {
   created_at?: string;
 }
 
+function getRowProjectName(row?: Partial<MaterialRequestRow> | null): string {
+  if (!row) return '';
+  const candidates = [row.project_name, row.project_site, row.site_name];
+  const found = candidates.find(
+    (val) => typeof val === 'string' && val.trim().length > 0
+  );
+  return found ? found.trim() : '';
+}
+
+function getProjectLabel(p: ProjectOption): string {
+  return (
+    p.project_name ||
+    p.name ||
+    p.site_name ||
+    p.title ||
+    String(p.id)
+  ).trim();
+}
+
 export default function MaterialRequestsPage() {
   const [role, setRole] = useState<ErpRole | null>(null);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [mrs, setMrs] = useState<MaterialRequestRow[]>([]);
+  const [selectedMrId, setSelectedMrId] = useState<string | number | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
@@ -77,7 +100,16 @@ export default function MaterialRequestsPage() {
       if (mrErr) {
         setMrs([]);
       } else if (Array.isArray(mrData)) {
-        setMrs(mrData as MaterialRequestRow[]);
+        const rows = mrData as MaterialRequestRow[];
+        setMrs(rows);
+        if (rows.length > 0 && selectedMrId === null) {
+          const firstRow = rows[0];
+          setSelectedMrId(firstRow.id);
+          const firstProj = getRowProjectName(firstRow);
+          if (firstProj && !selectedProject) {
+            setSelectedProject(firstProj);
+          }
+        }
       } else {
         setMrs([]);
       }
@@ -95,6 +127,39 @@ export default function MaterialRequestsPage() {
     loadEmptyOrLiveData();
   }, []);
 
+  const projectSuggestions = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of projects) {
+      const label = getProjectLabel(p);
+      if (label) set.add(label);
+    }
+    for (const row of mrs) {
+      const proj = getRowProjectName(row);
+      if (proj) set.add(proj);
+    }
+    return Array.from(set);
+  }, [projects, mrs]);
+
+  const activeMr = useMemo(
+    () => mrs.find((item) => String(item.id) === String(selectedMrId)) || null,
+    [mrs, selectedMrId]
+  );
+
+  const displayedProject = useMemo(() => {
+    if (selectedProject.trim()) return selectedProject.trim();
+    return getRowProjectName(activeMr);
+  }, [selectedProject, activeMr]);
+
+  const handleSelectMrRow = (row: MaterialRequestRow) => {
+    setSelectedMrId(row.id);
+    const proj = getRowProjectName(row);
+    setSelectedProject(proj);
+  };
+
+  const handleProjectInputChange = (val: string) => {
+    setSelectedProject(val);
+  };
+
   const handleCreateMr = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
@@ -102,8 +167,11 @@ export default function MaterialRequestsPage() {
     setErrorMsg(null);
 
     const qtyNum = Number(quantity);
-    if (!selectedProject.trim() || !materialName.trim() || !Number.isFinite(qtyNum) || qtyNum <= 0) {
-      setErrorMsg('Please select/enter Project/Site, Material Name, and a valid Quantity greater than 0.');
+    const cleanProject = selectedProject.trim();
+    if (!cleanProject || !materialName.trim() || !Number.isFinite(qtyNum) || qtyNum <= 0) {
+      setErrorMsg(
+        'Please select/enter Project/Site, Material Name, and a valid Quantity greater than 0.'
+      );
       setSubmitting(false);
       return;
     }
@@ -111,7 +179,7 @@ export default function MaterialRequestsPage() {
     const newRow: MaterialRequestRow = {
       id: Date.now(),
       mr_no: mrNo,
-      project_name: selectedProject.trim(),
+      project_name: cleanProject,
       material_name: materialName.trim(),
       quantity: qtyNum,
       unit,
@@ -155,7 +223,9 @@ export default function MaterialRequestsPage() {
         await loadEmptyOrLiveData();
       }
 
-      setStatusMsg(`Material Request ${newRow.mr_no} created for ${newRow.project_name}.`);
+      setSelectedMrId(newRow.id);
+      setSelectedProject(cleanProject);
+      setStatusMsg(`Material Request ${newRow.mr_no} created for ${cleanProject}.`);
       setMaterialName('');
       setQuantity('');
       setNeededBy('');
@@ -197,6 +267,27 @@ export default function MaterialRequestsPage() {
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
+        </div>
+
+        {/* Active Selected MR -> Project / Site Display Banner */}
+        <div className="bg-slate-900 border border-amber-500/40 rounded-xl p-4 shadow-lg flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-widest text-amber-400">
+              Indenting Project / Site (Selected MR)
+            </p>
+            <p className="text-lg font-extrabold text-white mt-0.5">
+              {displayedProject || 'Select an MR below or enter a Project / Site'}
+            </p>
+          </div>
+          <div className="text-xs text-slate-300 bg-slate-950 border border-slate-800 rounded-lg px-3.5 py-2">
+            {activeMr ? (
+              <span>
+                MR: <strong className="text-amber-300">{activeMr.mr_no ?? `#${activeMr.id}`}</strong>
+              </span>
+            ) : (
+              <span>New MR Draft</span>
+            )}
+          </div>
         </div>
 
         {/* Create MR Form */}
@@ -244,15 +335,14 @@ export default function MaterialRequestsPage() {
                 list="erp-projects-list"
                 required
                 value={selectedProject}
-                onChange={(e) => setSelectedProject(e.target.value)}
+                onChange={(e) => handleProjectInputChange(e.target.value)}
                 placeholder="Enter or select project/site"
                 className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-700 text-sm text-white focus:outline-none focus:border-amber-400"
               />
               <datalist id="erp-projects-list">
-                {projects.map((p) => {
-                  const label = p.project_name || p.name || p.site_name || String(p.id);
-                  return <option key={String(p.id)} value={label} />;
-                })}
+                {projectSuggestions.map((label) => (
+                  <option key={label} value={label} />
+                ))}
               </datalist>
             </div>
 
@@ -342,7 +432,7 @@ export default function MaterialRequestsPage() {
           </button>
         </form>
 
-        {/* MR List (Starts Empty When No MRs Exist) */}
+        {/* MR List */}
         <div className="bg-slate-900 border border-slate-800 rounded-xl shadow-xl overflow-hidden">
           <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between">
             <h2 className="text-sm font-bold uppercase tracking-wider text-amber-400">
@@ -350,7 +440,7 @@ export default function MaterialRequestsPage() {
             </h2>
             <span className="text-xs text-slate-400 flex items-center gap-1">
               <Building2 className="w-3.5 h-3.5 text-amber-400" />
-              Empty until new MR is submitted
+              Click any MR row to view its indenting Project / Site
             </span>
           </div>
 
@@ -376,24 +466,38 @@ export default function MaterialRequestsPage() {
                     </td>
                   </tr>
                 ) : (
-                  mrs.map((row) => (
-                    <tr key={String(row.id)} className="hover:bg-slate-800/40">
-                      <td className="py-3 px-4 font-bold text-white">
-                        {row.mr_no ?? `#${row.id}`}
-                      </td>
-                      <td className="py-3 px-4 text-slate-200">{row.project_name ?? '-'}</td>
-                      <td className="py-3 px-4 text-slate-200">{row.material_name ?? '-'}</td>
-                      <td className="py-3 px-4 text-right font-bold text-amber-300">
-                        {row.quantity ?? 0} {row.unit ?? ''}
-                      </td>
-                      <td className="py-3 px-4 text-slate-300">{row.needed_by ?? '-'}</td>
-                      <td className="py-3 px-4">
-                        <span className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 font-bold">
-                          {row.status ?? 'PENDING'}
-                        </span>
-                      </td>
-                    </tr>
-                  ))
+                  mrs.map((row) => {
+                    const rowProj = getRowProjectName(row) || '-';
+                    const isSelected = String(row.id) === String(selectedMrId);
+                    return (
+                      <tr
+                        key={String(row.id)}
+                        onClick={() => handleSelectMrRow(row)}
+                        className={`cursor-pointer transition-colors ${
+                          isSelected
+                            ? 'bg-amber-500/15 border-l-4 border-amber-400'
+                            : 'hover:bg-slate-800/40'
+                        }`}
+                      >
+                        <td className="py-3 px-4 font-bold text-white">
+                          {row.mr_no ?? `#${row.id}`}
+                        </td>
+                        <td className="py-3 px-4 font-semibold text-amber-300">
+                          {rowProj}
+                        </td>
+                        <td className="py-3 px-4 text-slate-200">{row.material_name ?? '-'}</td>
+                        <td className="py-3 px-4 text-right font-bold text-amber-300">
+                          {row.quantity ?? 0} {row.unit ?? ''}
+                        </td>
+                        <td className="py-3 px-4 text-slate-300">{row.needed_by ?? '-'}</td>
+                        <td className="py-3 px-4">
+                          <span className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 font-bold">
+                            {row.status ?? 'PENDING'}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
