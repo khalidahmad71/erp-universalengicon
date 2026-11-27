@@ -402,7 +402,7 @@ export default function MaterialRequestsPage() {
             <p className="text-xs text-slate-400 mt-0.5">
               {activeMr
                 ? `Selected MR: ${activeMr.mr_no ?? activeMr.mr_number ?? `#${activeMr.id}`}`
-                : 'Click any MR row below or enter a project below'}
+                : 'Enter a project below or select an MR row after creating one'}
             </p>
           </div>
 
@@ -477,6 +477,20 @@ export default function MaterialRequestsPage() {
                   <option key={label} value={label} />
                 ))}
               </datalist>
+              {projectSuggestions.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {projectSuggestions.map((label) => (
+                    <button
+                      key={label}
+                      type="button"
+                      onClick={() => setSelectedProject(label)}
+                      className="px-2 py-0.5 rounded bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-[11px] font-semibold text-amber-300 border border-slate-700 transition"
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div>
