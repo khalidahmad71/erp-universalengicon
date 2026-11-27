@@ -22,11 +22,18 @@ interface SitePaymentEntry {
 }
 
 const STORAGE_KEY = "ue_site_daily_payments_v1";
+const DEVICE_AUTH_KEY = "ue_site_pay_device_auth_v1";
 
 function getSupabaseBrowserClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-  return createClient(url, anonKey);
+  return createClient(url, anonKey, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+    },
+  });
 }
 
 const supabase = getSupabaseBrowserClient();
@@ -46,13 +53,29 @@ function getTodayISO(): string {
   return local.toISOString().split("T")[0];
 }
 
-function hasErpLoginCookie(): boolean {
-  if (typeof document === "undefined") return false;
-  return (
-    document.cookie.includes("erp_role=") ||
-    Boolean(localStorage.getItem("erp_role")) ||
-    Boolean(localStorage.getItem("ue_user_role"))
-  );
+function checkExistingErpAuth(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    if (localStorage.getItem(DEVICE_AUTH_KEY) === "1") return true;
+    if (document.cookie.includes("erp_role=")) return true;
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i) || "";
+      if (
+        key.includes("erp_role") ||
+        key.includes("ue_user") ||
+        key.includes("auth-token") ||
+        key.includes("supabase.auth")
+      ) {
+        const val = localStorage.getItem(key);
+        if (val && val !== "null" && val !== "undefined" && val !== "") {
+          return true;
+        }
+      }
+    }
+  } catch {
+    return false;
+  }
+  return false;
 }
 
 export default function SitePaymentsMobilePage() {
@@ -86,18 +109,29 @@ export default function SitePaymentsMobilePage() {
     let active = true;
 
     const verifyAccess = async () => {
+      if (checkExistingErpAuth()) {
+        try {
+          localStorage.setItem(DEVICE_AUTH_KEY, "1");
+        } catch {}
+        if (active) setAuthState("allowed");
+        return;
+      }
+
       try {
         const { data } = await supabase.auth.getSession();
         if (!active) return;
 
-        if (data.session || hasErpLoginCookie()) {
+        if (data.session) {
+          try {
+            localStorage.setItem(DEVICE_AUTH_KEY, "1");
+          } catch {}
           setAuthState("allowed");
         } else {
           setAuthState("locked");
         }
       } catch {
         if (!active) return;
-        setAuthState(hasErpLoginCookie() ? "allowed" : "locked");
+        setAuthState("locked");
       }
     };
 
@@ -130,6 +164,14 @@ export default function SitePaymentsMobilePage() {
       console.error("Failed to save local site payments:", e);
     }
   }, [entries, authState, isLoaded]);
+
+  const handleLockDevice = async () => {
+    try {
+      localStorage.removeItem(DEVICE_AUTH_KEY);
+      await supabase.auth.signOut();
+    } catch {}
+    setAuthState("locked");
+  };
 
   const savedSites = useMemo(() => {
     const unique = Array.from(new Set(entries.map((e) => e.project_site.trim()).filter(Boolean)));
@@ -266,7 +308,10 @@ export default function SitePaymentsMobilePage() {
       );
       showToast(`${pendingSyncEntries.length} entries synced to Universal Engicon ERP!`, "success");
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Sync failed. Check login/network.";
+      const message =
+        err instanceof Error
+          ? `${err.message} — Please Sign In once if RLS blocked sync.`
+          : "Sync failed. Please Sign In once and retry.";
       showToast(message, "error");
     } finally {
       setIsSyncing(false);
@@ -337,7 +382,7 @@ export default function SitePaymentsMobilePage() {
           </p>
           <h2 className="text-lg font-extrabold text-[#0B1F3A]">Sign In Required</h2>
           <p className="text-xs text-slate-600">
-            Site Daily Payment Log open karne ke liye pehle ERP mein sign in karein.
+            Ek baar ERP mein sign in karein — uske baad is phone par dobara login nahi maangega.
           </p>
           <Link
             href="/login"
@@ -353,20 +398,29 @@ export default function SitePaymentsMobilePage() {
   return (
     <div className="min-h-screen bg-[#F8F7F4] text-slate-900 pb-28">
       <header className="sticky top-0 z-30 bg-[#0B1F3A] text-white shadow-md border-b-2 border-[#C59B27]">
-        <div className="max-w-lg mx-auto px-4 py-3 flex items-center justify-between">
+        <div className="max-w-lg mx-auto px-4 py-3 flex items-center justify-between gap-2">
           <div>
             <p className="text-[10px] tracking-widest uppercase text-[#E6C567] font-semibold">
               Universal Engicon Pvt. Ltd.
             </p>
             <h1 className="text-base font-bold leading-tight">Site Daily Payment Log</h1>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowInstallGuide((prev) => !prev)}
-            className="px-3 py-1.5 rounded-lg bg-[#C59B27] text-[#0B1F3A] text-xs font-bold shadow active:scale-95 transition"
-          >
-            + Home Screen
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setShowInstallGuide((prev) => !prev)}
+              className="px-2.5 py-1.5 rounded-lg bg-[#C59B27] text-[#0B1F3A] text-xs font-bold shadow active:scale-95 transition"
+            >
+              + Home Screen
+            </button>
+            <button
+              type="button"
+              onClick={handleLockDevice}
+              className="px-2.5 py-1.5 rounded-lg bg-white/10 text-slate-200 text-xs font-semibold hover:bg-white/20"
+            >
+              Lock
+            </button>
+          </div>
         </div>
 
         {showInstallGuide && (
