@@ -3,9 +3,11 @@
 import React, { useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://jvorxidiigvdznnpgxrj.supabase.co';
+const supabaseUrl =
+  process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://jvorxidiigvdznnpgxrj.supabase.co';
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
+const supabase =
+  supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
 export default function EnterpriseLoginModule() {
   const [email, setEmail] = useState('md@universalengicon.com');
@@ -67,12 +69,10 @@ export default function EnterpriseLoginModule() {
         return;
       }
 
-      // Check Password
       if (userRecord.password_hash !== password) {
         const nextAttempts = (userRecord.failed_attempts || 0) + 1;
 
         if (nextAttempts >= 3) {
-          // 3rd wrong attempt -> Lock account & trigger reset request to Department
           await supabase
             .from('enterprise_users')
             .update({
@@ -106,7 +106,6 @@ export default function EnterpriseLoginModule() {
         return;
       }
 
-      // Valid Login -> Reset failed_attempts to 0
       if ((userRecord.failed_attempts || 0) > 0) {
         await supabase
           .from('enterprise_users')
@@ -114,12 +113,29 @@ export default function EnterpriseLoginModule() {
           .eq('id', userRecord.id);
       }
 
-      document.cookie = 'sb-access-token=; path=/; max-age=0';
-      document.cookie = `ue_session=${encodeURIComponent(userRecord.user_email)}; path=/; max-age=86400; SameSite=Lax`;
-      document.cookie = `ue_role=${encodeURIComponent(userRecord.role_designation)}; path=/; max-age=86400; SameSite=Lax`;
-      document.cookie = `ue_dept=${encodeURIComponent(userRecord.department || '')}; path=/; max-age=86400; SameSite=Lax`;
+      const roleValue = String(userRecord.role_designation || 'USER');
+      const deptValue = String(userRecord.department || '');
+      const emailValue = String(userRecord.user_email || cleanEmail);
 
-      window.location.href = '/dashboard';
+      document.cookie = 'sb-access-token=; path=/; max-age=0';
+      document.cookie = `ue_session=${encodeURIComponent(emailValue)}; path=/; max-age=2592000; SameSite=Lax`;
+      document.cookie = `ue_role=${encodeURIComponent(roleValue)}; path=/; max-age=2592000; SameSite=Lax`;
+      document.cookie = `erp_role=${encodeURIComponent(roleValue)}; path=/; max-age=2592000; SameSite=Lax`;
+      document.cookie = `ue_dept=${encodeURIComponent(deptValue)}; path=/; max-age=2592000; SameSite=Lax`;
+
+      try {
+        localStorage.setItem('ue_site_pay_device_auth_v1', '1');
+        localStorage.setItem('erp_role', roleValue);
+        localStorage.setItem('ue_session', emailValue);
+        localStorage.setItem('ue_dept', deptValue);
+      } catch {}
+
+      const params = new URLSearchParams(window.location.search);
+      const nextRoute = params.get('next');
+      const targetUrl =
+        nextRoute && nextRoute.startsWith('/') && nextRoute !== '/login' ? nextRoute : '/';
+
+      window.location.replace(targetUrl);
     } catch (err: any) {
       setErrorMsg(err?.message || 'Login failed. Please try again.');
       setIsLoading(false);
