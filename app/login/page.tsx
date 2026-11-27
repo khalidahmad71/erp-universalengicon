@@ -9,6 +9,21 @@ const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 const supabase =
   supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
+function normalizeErpRole(rawRole: string, email: string): string {
+  const val = (rawRole || '').trim().toLowerCase();
+  const cleanEmail = (email || '').trim().toLowerCase();
+
+  if (cleanEmail === 'md@universalengicon.com' || val.includes('managing') || val === 'md') {
+    return 'MD';
+  }
+  if (val.includes('admin')) return 'ADMIN';
+  if (val.includes('account')) return 'ACCOUNTANT';
+  if (val.includes('store')) return 'STORE_MANAGER';
+  if (val.includes('site') || val.includes('engineer')) return 'SITE_ENGINEER';
+  if (val.includes('purchase') || val.includes('procurement')) return 'PURCHASE_MANAGER';
+  return rawRole.trim() || 'MD';
+}
+
 export default function EnterpriseLoginModule() {
   const [email, setEmail] = useState('md@universalengicon.com');
   const [password, setPassword] = useState('');
@@ -113,19 +128,24 @@ export default function EnterpriseLoginModule() {
           .eq('id', userRecord.id);
       }
 
-      const roleValue = String(userRecord.role_designation || 'USER');
-      const deptValue = String(userRecord.department || '');
+      const normalizedRole = normalizeErpRole(
+        String(userRecord.role_designation || ''),
+        cleanEmail
+      );
+      const deptValue = String(userRecord.department || 'Management');
       const emailValue = String(userRecord.user_email || cleanEmail);
 
+      const maxAge = 60 * 60 * 24 * 30; // 30 days
       document.cookie = 'sb-access-token=; path=/; max-age=0';
-      document.cookie = `ue_session=${encodeURIComponent(emailValue)}; path=/; max-age=2592000; SameSite=Lax`;
-      document.cookie = `ue_role=${encodeURIComponent(roleValue)}; path=/; max-age=2592000; SameSite=Lax`;
-      document.cookie = `erp_role=${encodeURIComponent(roleValue)}; path=/; max-age=2592000; SameSite=Lax`;
-      document.cookie = `ue_dept=${encodeURIComponent(deptValue)}; path=/; max-age=2592000; SameSite=Lax`;
+      document.cookie = `ue_session=${encodeURIComponent(emailValue)}; path=/; max-age=${maxAge}; SameSite=Lax`;
+      document.cookie = `ue_role=${encodeURIComponent(normalizedRole)}; path=/; max-age=${maxAge}; SameSite=Lax`;
+      document.cookie = `erp_role=${encodeURIComponent(normalizedRole)}; path=/; max-age=${maxAge}; SameSite=Lax`;
+      document.cookie = `ue_dept=${encodeURIComponent(deptValue)}; path=/; max-age=${maxAge}; SameSite=Lax`;
 
       try {
         localStorage.setItem('ue_site_pay_device_auth_v1', '1');
-        localStorage.setItem('erp_role', roleValue);
+        localStorage.setItem('erp_role', normalizedRole);
+        localStorage.setItem('ue_role', normalizedRole);
         localStorage.setItem('ue_session', emailValue);
         localStorage.setItem('ue_dept', deptValue);
       } catch {}
@@ -133,7 +153,9 @@ export default function EnterpriseLoginModule() {
       const params = new URLSearchParams(window.location.search);
       const nextRoute = params.get('next');
       const targetUrl =
-        nextRoute && nextRoute.startsWith('/') && nextRoute !== '/login' ? nextRoute : '/';
+        nextRoute && nextRoute.startsWith('/') && !nextRoute.startsWith('/login')
+          ? nextRoute
+          : '/';
 
       window.location.replace(targetUrl);
     } catch (err: any) {

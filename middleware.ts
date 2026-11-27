@@ -1,29 +1,22 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
-import {
-  canAccessRoute,
-  ERP_ROLE_COOKIE,
-  normalizeErpRole,
-} from './lib/rbac';
+﻿import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
 
-const PUBLIC_PATHS = ['/login', '/unauthorized', '/_next', '/favicon.ico'];
+const PUBLIC_PATHS = ['/login', '/unauthorized', '/_next', '/favicon.ico', '/api'];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  if (
-    PUBLIC_PATHS.some((path) => pathname.startsWith(path)) ||
-    pathname.startsWith('/api')
-  ) {
+  if (PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
     return NextResponse.next();
   }
 
-  const rawCookie = request.cookies.get(ERP_ROLE_COOKIE)?.value;
-  const role = normalizeErpRole(rawCookie);
+  const erpRole = request.cookies.get('erp_role')?.value;
+  const ueSession = request.cookies.get('ue_session')?.value;
 
-  if (!canAccessRoute(role, pathname)) {
-    const unauthorizedUrl = request.nextUrl.clone();
-    unauthorizedUrl.pathname = '/unauthorized';
-    return NextResponse.redirect(unauthorizedUrl);
+  if (!erpRole && !ueSession) {
+    const loginUrl = new URL('/login', request.url);
+    loginUrl.searchParams.set('next', pathname);
+    return NextResponse.redirect(loginUrl);
   }
 
   return NextResponse.next();
