@@ -1,604 +1,872 @@
-﻿"use client";
+﻿'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import {
   Building2,
-  ClipboardList,
-  ShoppingCart,
-  Warehouse,
-  FileSpreadsheet,
-  Home,
-  Wallet,
+  PlusCircle,
   RefreshCw,
   CheckCircle2,
   AlertTriangle,
-  ArrowUpRight,
-  Scale,
-} from "lucide-react";
-import { supabase } from "@/lib/supabase";
-import { getClientErpRole } from "@/lib/erp-session";
-import type { ErpRole } from "@/lib/rbac";
+  Layers,
+} from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 
-interface LedgerRow {
-  id: string | number;
-  entry_date?: string | null;
-  created_at?: string | null;
-  account_name?: string | null;
-  ledger_name?: string | null;
-  voucher_no?: string | null;
-  reference_no?: string | null;
-  description?: string | null;
-  narration?: string | null;
-  debit?: number | string | null;
-  credit?: number | string | null;
-  amount?: number | string | null;
-  entry_type?: string | null;
-  project_name?: string | null;
+type OwnershipMode = 'JDA_SHARE' | 'SELF_PURCHASE';
+type UnitCategory = 'RESIDENTIAL' | 'COMMERCIAL';
+type ShareOwner = 'BUILDER' | 'LANDOWNER';
+
+interface GeneratedUnit {
+  unitCode: string;
+  floorNo: number;
+  floorLabel: string;
+  ownerShare: ShareOwner;
+  category: UnitCategory;
+  areaSqft: number;
+  ratePerSqft: number;
+  totalPrice: number;
+  status: 'AVAILABLE' | 'BOOKED';
 }
 
-interface PoRecord {
+interface ProjectRow {
   id: string | number;
-  po_no?: string | null;
-  po_number?: string | null;
-  vendor_name?: string | null;
   project_name?: string | null;
-  material_name?: string | null;
-  item_name?: string | null;
-  quantity?: number | string | null;
-  rate?: number | string | null;
-  total_amount?: number | string | null;
+  name?: string | null;
+  site_name?: string | null;
+  location?: string | null;
+  client_name?: string | null;
   status?: string | null;
+  total_floors?: number | null;
+  units_per_floor?: number | null;
+  ownership_mode?: string | null;
+  builder_floors?: string | null;
+  landowner_floors?: string | null;
+  units_matrix?: GeneratedUnit[] | null;
   created_at?: string | null;
 }
 
-interface GrnRecord {
-  id: string | number;
-  grn_no?: string | null;
-  po_no?: string | null;
-  po_id?: string | number | null;
-  project_name?: string | null;
-  material_name?: string | null;
-  item_name?: string | null;
-  received_qty?: number | string | null;
-  quantity?: number | string | null;
-  accepted_qty?: number | string | null;
-  status?: string | null;
-  created_at?: string | null;
+const PROJECTS_LOCAL_KEY = 'ue_projects_master_v2';
+
+function parseFloorList(input: string, maxFloors: number): number[] {
+  const nums = input
+    .split(',')
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isInteger(n) && n >= 1 && n <= maxFloors);
+  return Array.from(new Set(nums)).sort((a, b) => a - b);
 }
 
-interface SitePaymentRecord {
-  id: string | number;
-  amount?: number | string | null;
-  category?: string | null;
-  payment_mode?: string | null;
-  project_name?: string | null;
-  created_at?: string | null;
-}
-
-interface ThreeWayMatchItem {
-  key: string;
-  poNo: string;
-  grnNo: string;
-  vendor: string;
-  project: string;
-  poQty: number;
-  grnQty: number;
-  poAmount: number;
-  ledgerAmount: number;
-  status: "MATCHED_3WAY" | "QTY_VARIANCE" | "PENDING_GRN_OR_BILL";
-}
-
-function toNum(v: unknown): number {
-  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
-  if (typeof v === "string") {
-    const cleaned = v.replace(/[^0-9.-]/g, "");
-    const n = Number(cleaned);
-    return Number.isFinite(n) ? n : 0;
+function defaultBuilderFloors(totalFloors: number, mode: OwnershipMode): number[] {
+  if (mode === 'SELF_PURCHASE') {
+    return Array.from({ length: totalFloors }, (_, i) => i + 1);
   }
-  return 0;
+  // Odd floors (1, 3, 5, 7, 9...) for Builder by default in JDA
+  const odd: number[] = [];
+  for (let f = 1; f <= totalFloors; f += 2) odd.push(f);
+  return odd.length > 0 ? odd : [1];
 }
 
-function formatINR(val: number): string {
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 0,
-  }).format(Number.isFinite(val) ? val : 0);
+function buildFloorUnits(params: {
+  totalFloors: number;
+  unitsPerFloor: number;
+  ownershipMode: OwnershipMode;
+  builderFloorInput: string;
+  landownerFloorInput: string;
+  defaultCategory: UnitCategory;
+  defaultArea: number;
+  defaultRate: number;
+}): {
+  builderSet: Set<number>;
+  landownerSet: Set<number>;
+  units: GeneratedUnit[];
+} {
+  const floors = Math.max(1, Math.min(100, Math.floor(params.totalFloors || 1)));
+  const perFloor = Math.max(1, Math.min(50, Math.floor(params.unitsPerFloor || 1)));
+
+  const builderFloors =
+    params.ownershipMode === 'SELF_PURCHASE'
+      ? defaultBuilderFloors(floors, 'SELF_PURCHASE')
+      : params.builderFloorInput.trim()
+      ? parseFloorList(params.builderFloorInput, floors)
+      : defaultBuilderFloors(floors, 'JDA_SHARE');
+
+  const builderSet = new Set<number>(builderFloors);
+
+  const explicitLandowner =
+    params.ownershipMode === 'SELF_PURCHASE'
+      ? []
+      : params.landownerFloorInput.trim()
+      ? parseFloorList(params.landownerFloorInput, floors)
+      : [];
+
+  const landownerSet = new Set<number>(explicitLandowner);
+  if (params.ownershipMode === 'JDA_SHARE' && landownerSet.size === 0) {
+    for (let f = 1; f <= floors; f++) {
+      if (!builderSet.has(f)) landownerSet.add(f);
+    }
+  }
+
+  const units: GeneratedUnit[] = [];
+  for (let f = 1; f <= floors; f++) {
+    const ownerShare: ShareOwner =
+      params.ownershipMode === 'SELF_PURCHASE'
+        ? 'BUILDER'
+        : landownerSet.has(f) && !builderSet.has(f)
+        ? 'LANDOWNER'
+        : 'BUILDER';
+
+    for (let u = 1; u <= perFloor; u++) {
+      const unitCode = `${f}${String(u).padStart(2, '0')}`;
+      const totalPrice = Number((params.defaultArea * params.defaultRate).toFixed(2));
+      units.push({
+        unitCode,
+        floorNo: f,
+        floorLabel: `Floor ${f}`,
+        ownerShare,
+        category: params.defaultCategory,
+        areaSqft: params.defaultArea,
+        ratePerSqft: params.defaultRate,
+        totalPrice,
+        status: 'AVAILABLE',
+      });
+    }
+  }
+
+  return { builderSet, landownerSet, units };
 }
 
-export default function HomePage() {
-  const [role, setRole] = useState<ErpRole | null>(null);
+function readLocalProjects(): ProjectRow[] {
+  try {
+    const raw = localStorage.getItem(PROJECTS_LOCAL_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as ProjectRow[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalProjects(rows: ProjectRow[]) {
+  try {
+    localStorage.setItem(PROJECTS_LOCAL_KEY, JSON.stringify(rows));
+  } catch {}
+}
+
+export default function ProjectsMasterPage() {
+  const [projects, setProjects] = useState<ProjectRow[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | number | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
-  const [lastSynced, setLastSynced] = useState<string>("");
-  const [warningMsg, setWarningMsg] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState<boolean>(false);
+  const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const [projectsCount, setProjectsCount] = useState<number>(0);
-  const [openMrCount, setOpenMrCount] = useState<number>(0);
-  const [sitePaymentsTotal, setSitePaymentsTotal] = useState<number>(0);
-  const [ledgerRows, setLedgerRows] = useState<LedgerRow[]>([]);
-  const [poRows, setPoRows] = useState<PoRecord[]>([]);
-  const [grnRows, setGrnRows] = useState<GrnRecord[]>([]);
+  // Project & Building Setup Inputs
+  const [projectName, setProjectName] = useState<string>('');
+  const [location, setLocation] = useState<string>('');
+  const [clientName, setClientName] = useState<string>('');
+  const [status, setStatus] = useState<string>('ACTIVE');
 
-  const loadExecutiveData = useCallback(async () => {
+  const [ownershipMode, setOwnershipMode] = useState<OwnershipMode>('JDA_SHARE');
+  const [totalFloors, setTotalFloors] = useState<string>('10');
+  const [unitsPerFloor, setUnitsPerFloor] = useState<string>('4');
+  const [builderFloorsText, setBuilderFloorsText] = useState<string>('1, 3, 5, 7, 9');
+  const [landownerFloorsText, setLandownerFloorsText] = useState<string>('2, 4, 6, 8, 10');
+  const [defaultCategory, setDefaultCategory] = useState<UnitCategory>('RESIDENTIAL');
+  const [defaultArea, setDefaultArea] = useState<string>('1200');
+  const [defaultRate, setDefaultRate] = useState<string>('4500');
+
+  // Unit feed editor state
+  const [editingUnitCode, setEditingUnitCode] = useState<string | null>(null);
+  const [editOwnerShare, setEditOwnerShare] = useState<ShareOwner>('BUILDER');
+  const [editCategory, setEditCategory] = useState<UnitCategory>('RESIDENTIAL');
+  const [editArea, setEditArea] = useState<string>('1200');
+  const [editRate, setEditRate] = useState<string>('4500');
+  const [editStatus, setEditStatus] = useState<'AVAILABLE' | 'BOOKED'>('AVAILABLE');
+
+  const loadProjects = useCallback(async () => {
     setLoading(true);
-    setWarningMsg(null);
-    const warnings: string[] = [];
+    setErrorMsg(null);
+    const local = readLocalProjects();
 
     try {
-      const [projRes, mrRes, payRes, ledRes, poRes, grnRes] = await Promise.allSettled([
-        supabase.from("projects").select("*"),
-        supabase.from("material_requests").select("*"),
-        supabase.from("site_daily_payments").select("*"),
-        supabase.from("finance_ledger").select("*").order("created_at", { ascending: false }).limit(25),
-        supabase.from("purchase_orders").select("*").order("created_at", { ascending: false }).limit(25),
-        supabase.from("goods_receipt_notes").select("*").order("created_at", { ascending: false }).limit(25),
-      ]);
+      const { data, error } = await supabase
+        .from('projects')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-      if (projRes.status === "fulfilled" && !projRes.value.error && Array.isArray(projRes.value.data)) {
-        setProjectsCount(projRes.value.data.length);
-      } else {
-        warnings.push("Projects count unavailable");
+      if (error) {
+        setErrorMsg(`Supabase notice: ${error.message} — showing cached/local projects.`);
+        setProjects(local);
+        if (local.length > 0 && selectedProjectId === null) {
+          setSelectedProjectId(local[0].id);
+        }
+        return;
       }
 
-      if (mrRes.status === "fulfilled" && !mrRes.value.error && Array.isArray(mrRes.value.data)) {
-        const pending = mrRes.value.data.filter(
-          (m: Record<string, unknown>) =>
-            String(m.status ?? "PENDING_APPROVAL").toUpperCase() !== "APPROVED" &&
-            String(m.status ?? "").toUpperCase() !== "CLOSED"
-        );
-        setOpenMrCount(pending.length);
-      }
+      const dbRows = Array.isArray(data) ? (data as ProjectRow[]) : [];
+      const merged = dbRows.length > 0 ? dbRows : local;
+      setProjects(merged);
+      if (dbRows.length > 0) saveLocalProjects(dbRows);
 
-      if (payRes.status === "fulfilled" && !payRes.value.error && Array.isArray(payRes.value.data)) {
-        const totalPay = (payRes.value.data as SitePaymentRecord[]).reduce(
-          (acc, row) => acc + toNum(row.amount),
-          0
-        );
-        setSitePaymentsTotal(totalPay);
+      if (merged.length > 0 && selectedProjectId === null) {
+        setSelectedProjectId(merged[0].id);
       }
-
-      if (ledRes.status === "fulfilled" && !ledRes.value.error && Array.isArray(ledRes.value.data)) {
-        setLedgerRows(ledRes.value.data as LedgerRow[]);
-      } else {
-        setLedgerRows([]);
-        warnings.push("finance_ledger sync pending");
-      }
-
-      if (poRes.status === "fulfilled" && !poRes.value.error && Array.isArray(poRes.value.data)) {
-        setPoRows(poRes.value.data as PoRecord[]);
-      } else {
-        setPoRows([]);
-      }
-
-      if (grnRes.status === "fulfilled" && !grnRes.value.error && Array.isArray(grnRes.value.data)) {
-        setGrnRows(grnRes.value.data as GrnRecord[]);
-      } else {
-        setGrnRows([]);
-      }
-
-      if (warnings.length > 0) {
-        setWarningMsg(warnings.join(" • "));
-      }
-      setLastSynced(new Date().toLocaleTimeString("en-IN"));
     } catch (err) {
-      setWarningMsg(err instanceof Error ? err.message : "Error syncing dashboard data.");
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to load projects.');
+      setProjects(local);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [selectedProjectId]);
 
   useEffect(() => {
-    setRole(getClientErpRole());
-    loadExecutiveData();
-  }, [loadExecutiveData]);
+    loadProjects();
+  }, [loadProjects]);
 
-  const financeSummary = useMemo(() => {
-    let totalDebit = 0;
-    let totalCredit = 0;
-
-    for (const r of ledgerRows) {
-      const d = toNum(r.debit);
-      const c = toNum(r.credit);
-      if (d > 0 || c > 0) {
-        totalDebit += d;
-        totalCredit += c;
-      } else {
-        const amt = toNum(r.amount);
-        const type = String(r.entry_type ?? "").toUpperCase();
-        if (type === "CREDIT" || type === "CR") totalCredit += amt;
-        else totalDebit += amt;
+  const handleOwnershipChange = (nextMode: OwnershipMode) => {
+    setOwnershipMode(nextMode);
+    const floorsNum = Math.max(1, Math.min(100, Number(totalFloors) || 10));
+    if (nextMode === 'SELF_PURCHASE') {
+      const all = Array.from({ length: floorsNum }, (_, i) => i + 1).join(', ');
+      setBuilderFloorsText(all);
+      setLandownerFloorsText('');
+    } else {
+      const odd = defaultBuilderFloors(floorsNum, 'JDA_SHARE').join(', ');
+      const even: number[] = [];
+      const oddSet = new Set(defaultBuilderFloors(floorsNum, 'JDA_SHARE'));
+      for (let f = 1; f <= floorsNum; f++) {
+        if (!oddSet.has(f)) even.push(f);
       }
+      setBuilderFloorsText(odd);
+      setLandownerFloorsText(even.join(', '));
+    }
+  };
+
+  const previewStructure = useMemo(() => {
+    return buildFloorUnits({
+      totalFloors: Number(totalFloors) || 1,
+      unitsPerFloor: Number(unitsPerFloor) || 1,
+      ownershipMode,
+      builderFloorInput: builderFloorsText,
+      landownerFloorInput: landownerFloorsText,
+      defaultCategory,
+      defaultArea: Math.max(0, Number(defaultArea) || 0),
+      defaultRate: Math.max(0, Number(defaultRate) || 0),
+    });
+  }, [
+    totalFloors,
+    unitsPerFloor,
+    ownershipMode,
+    builderFloorsText,
+    landownerFloorsText,
+    defaultCategory,
+    defaultArea,
+    defaultRate,
+  ]);
+
+  const handleAddProject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setStatusMsg(null);
+    setErrorMsg(null);
+
+    const cleanName = projectName.trim();
+    if (!cleanName) {
+      setErrorMsg('Please enter Project / Site Name.');
+      setSubmitting(false);
+      return;
     }
 
-    return {
-      totalDebit,
-      totalCredit,
-      netPosition: totalDebit - totalCredit,
+    const built = buildFloorUnits({
+      totalFloors: Number(totalFloors) || 1,
+      unitsPerFloor: Number(unitsPerFloor) || 1,
+      ownershipMode,
+      builderFloorInput: builderFloorsText,
+      landownerFloorInput: landownerFloorsText,
+      defaultCategory,
+      defaultArea: Math.max(0, Number(defaultArea) || 0),
+      defaultRate: Math.max(0, Number(defaultRate) || 0),
+    });
+
+    const newProj: ProjectRow = {
+      id: Date.now(),
+      name: cleanName,
+      project_name: cleanName,
+      site_name: location.trim() || cleanName,
+      location: location.trim() || '-',
+      client_name:
+        clientName.trim() ||
+        (ownershipMode === 'SELF_PURCHASE'
+          ? 'Self Purchase (100% Universal Engicon)'
+          : 'JDA (Builder + Landowner)'),
+      status,
+      total_floors: Math.max(1, Number(totalFloors) || 1),
+      units_per_floor: Math.max(1, Number(unitsPerFloor) || 1),
+      ownership_mode: ownershipMode,
+      builder_floors: Array.from(built.builderSet).join(', '),
+      landowner_floors: Array.from(built.landownerSet).join(', '),
+      units_matrix: built.units,
+      created_at: new Date().toISOString(),
     };
-  }, [ledgerRows]);
 
-  const threeWayMatches = useMemo<ThreeWayMatchItem[]>(() => {
-    return poRows.slice(0, 8).map((po, idx) => {
-      const poNo = String(po.po_no ?? po.po_number ?? `PO-${po.id ?? idx + 1}`);
-      const poQty = toNum(po.quantity) || 1;
-      const poRate = toNum(po.rate);
-      const computedPoAmt = toNum(po.total_amount) || poQty * poRate;
+    try {
+      // Minimal safe insert first so schema differences on extra columns never block project creation
+      let { data, error } = await supabase
+        .from('projects')
+        .insert([
+          {
+            name: cleanName,
+            site_name: location.trim() || cleanName,
+            status,
+          },
+        ])
+        .select('*');
 
-      const matchingGrns = grnRows.filter(
-        (g) =>
-          (g.po_no && String(g.po_no).trim().toLowerCase() === poNo.trim().toLowerCase()) ||
-          (g.po_id !== undefined && g.po_id !== null && String(g.po_id) === String(po.id))
-      );
-
-      const grnQty = matchingGrns.reduce(
-        (sum, g) => sum + (toNum(g.accepted_qty) || toNum(g.received_qty) || toNum(g.quantity)),
-        0
-      );
-
-      const matchedLedgerAmt = ledgerRows
-        .filter((l) => {
-          const ref = String(l.voucher_no ?? l.reference_no ?? l.description ?? "").toLowerCase();
-          return ref.includes(poNo.toLowerCase());
-        })
-        .reduce((sum, l) => sum + (toNum(l.debit) || toNum(l.credit) || toNum(l.amount)), 0);
-
-      let status: ThreeWayMatchItem["status"] = "PENDING_GRN_OR_BILL";
-      if (matchingGrns.length === 0 || matchedLedgerAmt === 0) {
-        status = "PENDING_GRN_OR_BILL";
-      } else if (Math.abs(poQty - grnQty) > 0.001 || Math.abs(computedPoAmt - matchedLedgerAmt) > 1) {
-        status = "QTY_VARIANCE";
-      } else {
-        status = "MATCHED_3WAY";
+      if (error) {
+        const retry = await supabase
+          .from('projects')
+          .insert([
+            {
+              project_name: cleanName,
+              site_name: location.trim() || cleanName,
+              location: location.trim() || null,
+              client_name: newProj.client_name,
+              status,
+            },
+          ])
+          .select('*');
+        data = retry.data;
+        error = retry.error;
       }
 
-      return {
-        key: `${poNo}-${idx}`,
-        poNo,
-        grnNo: matchingGrns[0]?.grn_no ? String(matchingGrns[0].grn_no) : matchingGrns.length > 0 ? `GRN-${matchingGrns[0].id}` : "Pending GRN",
-        vendor: String(po.vendor_name ?? "Vendor Master"),
-        project: String(po.project_name ?? "All Sites"),
-        poQty,
-        grnQty,
-        poAmount: computedPoAmt,
-        ledgerAmount: matchedLedgerAmt,
-        status,
-      };
-    });
-  }, [poRows, grnRows, ledgerRows]);
+      const persistedProj: ProjectRow =
+        Array.isArray(data) && data[0]?.id !== undefined
+          ? { ...newProj, ...(data[0] as ProjectRow), units_matrix: built.units }
+          : newProj;
+
+      const updatedList = [
+        persistedProj,
+        ...projects.filter((p) => String(p.id) !== String(persistedProj.id)),
+      ];
+      setProjects(updatedList);
+      saveLocalProjects(updatedList);
+      setSelectedProjectId(persistedProj.id);
+
+      if (error) {
+        setStatusMsg(
+          `Project "${cleanName}" opened with ${built.units.length} units (saved locally; DB notice: ${error.message}).`
+        );
+      } else {
+        setStatusMsg(
+          `Project "${cleanName}" saved & ${built.units.length} units opened across ${
+            Number(totalFloors) || 1
+          } floors.`
+        );
+      }
+
+      setProjectName('');
+      setLocation('');
+      setClientName('');
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Error creating project.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const activeProject = useMemo(() => {
+    if (projects.length === 0) return null;
+    return (
+      projects.find((p) => String(p.id) === String(selectedProjectId)) || projects[0]
+    );
+  }, [projects, selectedProjectId]);
+
+  const activeUnits = useMemo<GeneratedUnit[]>(() => {
+    if (!activeProject) return [];
+    if (Array.isArray(activeProject.units_matrix) && activeProject.units_matrix.length > 0) {
+      return activeProject.units_matrix;
+    }
+    const floors = Math.max(1, Number(activeProject.total_floors) || 1);
+    const perFloor = Math.max(1, Number(activeProject.units_per_floor) || 1);
+    const mode: OwnershipMode =
+      activeProject.ownership_mode === 'SELF_PURCHASE' ? 'SELF_PURCHASE' : 'JDA_SHARE';
+    return buildFloorUnits({
+      totalFloors: floors,
+      unitsPerFloor: perFloor,
+      ownershipMode: mode,
+      builderFloorInput: activeProject.builder_floors || '',
+      landownerFloorInput: activeProject.landowner_floors || '',
+      defaultCategory: 'RESIDENTIAL',
+      defaultArea: 1200,
+      defaultRate: 4500,
+    }).units;
+  }, [activeProject]);
+
+  const openUnitEditor = (u: GeneratedUnit) => {
+    setEditingUnitCode(u.unitCode);
+    setEditOwnerShare(u.ownerShare);
+    setEditCategory(u.category);
+    setEditArea(String(u.areaSqft));
+    setEditRate(String(u.ratePerSqft));
+    setEditStatus(u.status);
+  };
+
+  const handleSaveUnitData = (unitCode: string) => {
+    if (!activeProject) return;
+    const areaNum = Math.max(0, Number(editArea) || 0);
+    const rateNum = Math.max(0, Number(editRate) || 0);
+    const updatedUnits = activeUnits.map((u) =>
+      u.unitCode === unitCode
+        ? {
+            ...u,
+            ownerShare: editOwnerShare,
+            category: editCategory,
+            areaSqft: areaNum,
+            ratePerSqft: rateNum,
+            totalPrice: Number((areaNum * rateNum).toFixed(2)),
+            status: editStatus,
+          }
+        : u
+    );
+
+    const updatedProjects = projects.map((p) =>
+      String(p.id) === String(activeProject.id) ? { ...p, units_matrix: updatedUnits } : p
+    );
+    setProjects(updatedProjects);
+    saveLocalProjects(updatedProjects);
+    setEditingUnitCode(null);
+    setStatusMsg(`Unit ${unitCode} data updated (${editOwnerShare} • ${editCategory}).`);
+  };
+
+  const summaryCounts = useMemo(() => {
+    let builderCount = 0;
+    let landownerCount = 0;
+    let residentialCount = 0;
+    let commercialCount = 0;
+
+    for (const u of activeUnits) {
+      if (u.ownerShare === 'BUILDER') builderCount++;
+      else landownerCount++;
+
+      if (u.category === 'RESIDENTIAL') residentialCount++;
+      else commercialCount++;
+    }
+
+    return { builderCount, landownerCount, residentialCount, commercialCount };
+  }, [activeUnits]);
 
   return (
-    <div className="min-h-screen bg-[#F8F7F4] text-slate-900 p-4 md:p-6">
-      <div className="max-w-6xl mx-auto space-y-5">
-        {/* Top Command Header */}
-        <div className="bg-[#0B1F3A] text-white rounded-2xl p-5 border-b-4 border-[#C59B27] shadow flex flex-wrap items-center justify-between gap-4">
+    <div className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-8">
+      <div className="max-w-7xl mx-auto space-y-6">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl">
           <div>
-            <p className="text-[11px] uppercase tracking-widest text-[#E6C567] font-semibold">
-              Universal Engicon Pvt. Ltd. • Enterprise Finance &amp; Ops
-            </p>
-            <h1 className="text-xl md:text-2xl font-bold mt-1">
-              Executive ERP Command Center
+            <div className="flex items-center gap-2 text-amber-400 text-xs font-bold uppercase tracking-widest">
+              <Building2 className="w-4 h-4" />
+              Project, Floor &amp; Unit Matrix Setup
+            </div>
+            <h1 className="text-2xl font-extrabold text-white tracking-tight mt-0.5">
+              New Project &amp; Floor/Unit Generator — UNIVERSAL ENGICON PVT. LTD.
             </h1>
-            <p className="text-xs text-slate-300 mt-1">
-              Active Role:{" "}
-              <span className="font-bold text-[#E6C567]">
-                {role ?? "Executive / Session Active"}
-              </span>
-              {lastSynced ? ` • Last Synced: ${lastSynced}` : ""}
+            <p className="text-xs text-slate-400 mt-1">
+              Kisi bhi floor count (5, 10, 15+) ke liye JDA (Builder/Landowner) ya Self Purchase ke hisaab se floors aur units open karein.
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={loadExecutiveData}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#143159] hover:bg-[#1c4275] text-white border border-[#C59B27]/50 text-xs font-bold uppercase tracking-wide transition"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 text-[#E6C567] ${loading ? "animate-spin" : ""}`} />
-              Sync KPIs
-            </button>
-            <Link
-              href="/login"
-              className="px-4 py-2 rounded-xl bg-[#C59B27] hover:bg-[#d8ae37] text-[#0B1F3A] text-xs font-extrabold uppercase tracking-wide transition"
-            >
-              MD / Staff Sign In
-            </Link>
-          </div>
-        </div>
-
-        {warningMsg && (
-          <div className="flex items-center gap-2 p-3 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs font-semibold">
-            <AlertTriangle className="w-4 h-4 shrink-0 text-amber-700" />
-            <span>{warningMsg}</span>
-          </div>
-        )}
-
-        {/* Executive KPI Row */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-          <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-            <p className="text-[11px] font-bold text-slate-500 uppercase">Active Projects / Sites</p>
-            <p className="text-2xl font-extrabold text-[#0B1F3A] mt-1">
-              {loading ? "..." : projectsCount}
-            </p>
-            <Link
-              href="/projects"
-              className="inline-flex items-center gap-1 text-xs font-bold text-[#0B1F3A] hover:text-[#C59B27] mt-2"
-            >
-              Manage Project Master <ArrowUpRight className="w-3.5 h-3.5" />
-            </Link>
-          </div>
-
-          <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-            <p className="text-[11px] font-bold text-slate-500 uppercase">Open Material Requests</p>
-            <p className="text-2xl font-extrabold text-[#0B1F3A] mt-1">
-              {loading ? "..." : openMrCount}
-            </p>
+          <div className="flex items-center gap-2">
             <Link
               href="/mr"
-              className="inline-flex items-center gap-1 text-xs font-bold text-[#0B1F3A] hover:text-[#C59B27] mt-2"
+              className="px-4 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-extrabold uppercase"
             >
-              Review Indents (MR) <ArrowUpRight className="w-3.5 h-3.5" />
+              Go to MR Module
             </Link>
-          </div>
-
-          <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-            <p className="text-[11px] font-bold text-slate-500 uppercase">Site Daily Payments</p>
-            <p className="text-2xl font-extrabold text-[#0B1F3A] mt-1">
-              {loading ? "..." : formatINR(sitePaymentsTotal)}
-            </p>
-            <Link
-              href="/site-payments"
-              className="inline-flex items-center gap-1 text-xs font-bold text-[#0B1F3A] hover:text-[#C59B27] mt-2"
+            <button
+              type="button"
+              onClick={() => loadProjects()}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 text-xs font-bold uppercase"
             >
-              Open Site Pay Log <ArrowUpRight className="w-3.5 h-3.5" />
-            </Link>
-          </div>
-
-          <div className="bg-[#0B1F3A] text-white border-2 border-[#C59B27] rounded-xl p-4 shadow-sm">
-            <p className="text-[11px] font-bold text-[#E6C567] uppercase">Finance Ledger Volume</p>
-            <p className="text-2xl font-extrabold text-white mt-1">
-              {loading ? "..." : formatINR(financeSummary.totalDebit || financeSummary.totalCredit)}
-            </p>
-            <p className="text-[11px] text-slate-300 mt-1.5">
-              Dr: {formatINR(financeSummary.totalDebit)} • Cr: {formatINR(financeSummary.totalCredit)}
-            </p>
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
           </div>
         </div>
 
-        {/* Core ERP Module Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-          <Link
-            href="/site-payments"
-            className="bg-[#0B1F3A] text-white border-2 border-[#C59B27] rounded-xl p-4 shadow-sm hover:bg-[#143159] transition"
-          >
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-bold text-[#E6C567] uppercase">Mobile Site Entry</p>
-              <Wallet className="w-4 h-4 text-[#E6C567]" />
-            </div>
-            <p className="text-base font-extrabold text-white mt-1">Site Daily Payments</p>
-            <p className="text-xs text-slate-300 mt-1">Labor, staff &amp; vendor payment log</p>
-          </Link>
-
-          <Link
-            href="/mr"
-            className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:border-[#0B1F3A] transition"
-          >
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-bold text-slate-500 uppercase">Procurement</p>
-              <ClipboardList className="w-4 h-4 text-[#0B1F3A]" />
-            </div>
-            <p className="text-base font-extrabold text-[#0B1F3A] mt-1">Material Requests (MR)</p>
-            <p className="text-xs text-slate-600 mt-1">Site indenting &amp; approval workflow</p>
-          </Link>
-
-          <Link
-            href="/po"
-            className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:border-[#0B1F3A] transition"
-          >
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-bold text-slate-500 uppercase">Procurement</p>
-              <ShoppingCart className="w-4 h-4 text-[#0B1F3A]" />
-            </div>
-            <p className="text-base font-extrabold text-[#0B1F3A] mt-1">Purchase Orders (PO)</p>
-            <p className="text-xs text-slate-600 mt-1">Vendor procurement &amp; GST orders</p>
-          </Link>
-
-          <Link
-            href="/store"
-            className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:border-[#0B1F3A] transition"
-          >
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-bold text-slate-500 uppercase">Store</p>
-              <Warehouse className="w-4 h-4 text-[#0B1F3A]" />
-            </div>
-            <p className="text-base font-extrabold text-[#0B1F3A] mt-1">Store Inventory &amp; GRN</p>
-            <p className="text-xs text-slate-600 mt-1">Material stock &amp; site inward</p>
-          </Link>
-
-          <Link
-            href="/mb-bills"
-            className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:border-[#0B1F3A] transition"
-          >
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-bold text-slate-500 uppercase">Billing</p>
-              <FileSpreadsheet className="w-4 h-4 text-[#0B1F3A]" />
-            </div>
-            <p className="text-base font-extrabold text-[#0B1F3A] mt-1">Contractor Bills &amp; MB</p>
-            <p className="text-xs text-slate-600 mt-1">Measurement books &amp; RA billing</p>
-          </Link>
-
-          <Link
-            href="/sales"
-            className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:border-[#0B1F3A] transition"
-          >
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-bold text-slate-500 uppercase">Real Estate</p>
-              <Home className="w-4 h-4 text-[#0B1F3A]" />
-            </div>
-            <p className="text-base font-extrabold text-[#0B1F3A] mt-1">Unit Matrix &amp; Sales</p>
-            <p className="text-xs text-slate-600 mt-1">Bookings, receipts &amp; CLP milestones</p>
-          </Link>
-
-          <Link
-            href="/projects"
-            className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:border-[#0B1F3A] transition"
-          >
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-bold text-slate-500 uppercase">Master Setup</p>
-              <Building2 className="w-4 h-4 text-[#0B1F3A]" />
-            </div>
-            <p className="text-base font-extrabold text-[#0B1F3A] mt-1">Projects &amp; Sites</p>
-            <p className="text-xs text-slate-600 mt-1">Add &amp; link active project sites</p>
-          </Link>
-
-          <Link
-            href="/finance"
-            className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:border-[#0B1F3A] transition"
-          >
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-bold text-slate-500 uppercase">Enterprise Finance</p>
-              <Scale className="w-4 h-4 text-[#0B1F3A]" />
-            </div>
-            <p className="text-base font-extrabold text-[#0B1F3A] mt-1">Ledger, GST &amp; Bills</p>
-            <p className="text-xs text-slate-600 mt-1">Double-entry ledger &amp; invoice sync</p>
-          </Link>
-        </div>
-
-        {/* 3-Way Invoice Matching Monitor (PO -> GRN -> Ledger/Bill) */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-3">
+        {/* Create Project & Open Floors Form */}
+        <form
+          onSubmit={handleAddProject}
+          className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl space-y-5"
+        >
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <p className="text-[11px] font-bold uppercase tracking-wider text-[#C59B27]">
-                Enterprise Finance Control
-              </p>
-              <h2 className="text-base font-extrabold text-[#0B1F3A]">
-                3-Way Invoice Matching (Purchase Order → GRN → Finance Ledger)
-              </h2>
-            </div>
-            <span className="text-xs text-slate-500">
-              Checks PO Qty &amp; Value against GRN Accepted Qty &amp; Ledger Posting
+            <h2 className="text-sm font-bold uppercase tracking-wider text-amber-400 flex items-center gap-2">
+              <Layers className="w-4 h-4" />
+              1. Add New Project &amp; Open Floors / Units
+            </h2>
+            <span className="text-xs text-slate-300 font-semibold">
+              Preview: {previewStructure.units.length} Units Open (Builder:{' '}
+              {Array.from(previewStructure.builderSet).join(',') || '-'} | Landowner:{' '}
+              {Array.from(previewStructure.landownerSet).join(',') || 'None'})
             </span>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="bg-[#F8F7F4] text-slate-600 uppercase border-b border-slate-200">
-                  <th className="py-2.5 px-3">PO No.</th>
-                  <th className="py-2.5 px-3">GRN Ref</th>
-                  <th className="py-2.5 px-3">Vendor / Project</th>
-                  <th className="py-2.5 px-3 text-right">PO Qty vs GRN</th>
-                  <th className="py-2.5 px-3 text-right">PO vs Ledger</th>
-                  <th className="py-2.5 px-3">3-Way Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {threeWayMatches.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="py-6 text-center text-slate-500">
-                      No Purchase Orders found yet. Create a PO and GRN to test 3-way invoice matching.
-                    </td>
-                  </tr>
-                ) : (
-                  threeWayMatches.map((m) => (
-                    <tr key={m.key} className="hover:bg-slate-50">
-                      <td className="py-2.5 px-3 font-bold text-[#0B1F3A]">{m.poNo}</td>
-                      <td className="py-2.5 px-3 text-slate-700">{m.grnNo}</td>
-                      <td className="py-2.5 px-3 text-slate-700">
-                        <span className="font-semibold">{m.vendor}</span> • {m.project}
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-semibold text-slate-800">
-                        {m.poQty} / {m.grnQty}
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-semibold text-slate-800">
-                        {formatINR(m.poAmount)} / {formatINR(m.ledgerAmount)}
-                      </td>
-                      <td className="py-2.5 px-3">
-                        {m.status === "MATCHED_3WAY" ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold">
-                            <CheckCircle2 className="w-3 h-3" /> MATCHED
-                          </span>
-                        ) : m.status === "QTY_VARIANCE" ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-red-100 text-red-800 font-bold">
-                            <AlertTriangle className="w-3 h-3" /> VARIANCE
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-100 text-amber-900 font-bold">
-                            PENDING GRN/BILL
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+          {statusMsg && (
+            <div className="flex items-center gap-2 p-3 rounded-lg bg-emerald-950/70 border border-emerald-700 text-emerald-200 text-xs font-semibold">
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+              <span>{statusMsg}</span>
+            </div>
+          )}
 
-        {/* Recent Finance Ledger Entries */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-extrabold text-[#0B1F3A]">
-              Recent Finance Ledger Entries ({ledgerRows.length})
-            </h2>
-            <Link
-              href="/finance"
-              className="text-xs font-bold text-[#0B1F3A] hover:text-[#C59B27]"
-            >
-              View Full Ledger →
-            </Link>
+          {errorMsg && (
+            <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-950/60 border border-amber-700 text-amber-200 text-xs font-semibold">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-300 mb-1.5">
+                Project / Building Name *
+              </label>
+              <input
+                type="text"
+                required
+                value={projectName}
+                onChange={(e) => setProjectName(e.target.value)}
+                placeholder="e.g. Sahar Tower / Godrej Zen"
+                className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-700 text-sm text-white focus:outline-none focus:border-amber-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-300 mb-1.5">
+                Location / Site
+              </label>
+              <input
+                type="text"
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                placeholder="Patna / Kolkata / Lucknow"
+                className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-700 text-sm text-white focus:outline-none focus:border-amber-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-300 mb-1.5">
+                Ownership Type
+              </label>
+              <select
+                value={ownershipMode}
+                onChange={(e) => handleOwnershipChange(e.target.value as OwnershipMode)}
+                className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-700 text-sm text-white focus:outline-none focus:border-amber-400"
+              >
+                <option value="JDA_SHARE">JDA (Builder + Landowner Floors)</option>
+                <option value="SELF_PURCHASE">Self Purchase (100% Builder)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-300 mb-1.5">
+                Project Status
+              </label>
+              <select
+                value={status}
+                onChange={(e) => setStatus(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-700 text-sm text-white focus:outline-none focus:border-amber-400"
+              >
+                <option value="ACTIVE">ACTIVE</option>
+                <option value="PLANNING">PLANNING</option>
+                <option value="COMPLETED">COMPLETED</option>
+              </select>
+            </div>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="bg-[#F8F7F4] text-slate-600 uppercase border-b border-slate-200">
-                  <th className="py-2.5 px-3">Voucher / Ref</th>
-                  <th className="py-2.5 px-3">Account / Narration</th>
-                  <th className="py-2.5 px-3">Project</th>
-                  <th className="py-2.5 px-3 text-right">Debit</th>
-                  <th className="py-2.5 px-3 text-right">Credit</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {ledgerRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="py-6 text-center text-slate-500">
-                      No ledger rows returned from `finance_ledger` yet.
-                    </td>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-300 mb-1.5">
+                Total Floors (5 / 10 / 15+)
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="100"
+                value={totalFloors}
+                onChange={(e) => setTotalFloors(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-700 text-sm text-white focus:outline-none focus:border-amber-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-300 mb-1.5">
+                Units Per Floor
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="50"
+                value={unitsPerFloor}
+                onChange={(e) => setUnitsPerFloor(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-700 text-sm text-white focus:outline-none focus:border-amber-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-300 mb-1.5">
+                Builder Share Floors
+              </label>
+              <input
+                type="text"
+                disabled={ownershipMode === 'SELF_PURCHASE'}
+                value={builderFloorsText}
+                onChange={(e) => setBuilderFloorsText(e.target.value)}
+                placeholder="e.g. 1, 3, 5, 7, 9"
+                className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-700 text-sm text-white disabled:opacity-60 focus:outline-none focus:border-amber-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-300 mb-1.5">
+                Landowner Share Floors
+              </label>
+              <input
+                type="text"
+                disabled={ownershipMode === 'SELF_PURCHASE'}
+                value={landownerFloorsText}
+                onChange={(e) => setLandownerFloorsText(e.target.value)}
+                placeholder="e.g. 2, 4, 6, 8, 10"
+                className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-700 text-sm text-white disabled:opacity-60 focus:outline-none focus:border-amber-400"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-300 mb-1.5">
+                Default Unit Category
+              </label>
+              <select
+                value={defaultCategory}
+                onChange={(e) => setDefaultCategory(e.target.value as UnitCategory)}
+                className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-700 text-sm text-white focus:outline-none focus:border-amber-400"
+              >
+                <option value="RESIDENTIAL">RESIDENTIAL (Flat/Apartment)</option>
+                <option value="COMMERCIAL">COMMERCIAL (Shop/Office)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-300 mb-1.5">
+                Default Area (Sq.Ft)
+              </label>
+              <input
+                type="number"
+                min="0"
+                value={defaultArea}
+                onChange={(e) => setDefaultArea(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-700 text-sm text-white focus:outline-none focus:border-amber-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-300 mb-1.5">
+                Default Rate / Sq.Ft (₹)
+              </label>
+              <input
+                type="number"
+                min="0"
+                value={defaultRate}
+                onChange={(e) => setDefaultRate(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-700 text-sm text-white focus:outline-none focus:border-amber-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-300 mb-1.5">
+                Landowner / Partner Note
+              </label>
+              <input
+                type="text"
+                value={clientName}
+                onChange={(e) => setClientName(e.target.value)}
+                placeholder="Optional landowner or developer note"
+                className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-700 text-sm text-white focus:outline-none focus:border-amber-400"
+              />
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={submitting}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-extrabold text-sm shadow-lg transition-all"
+          >
+            <PlusCircle className="w-4 h-4" />
+            {submitting
+              ? 'Opening Floors & Saving Project...'
+              : 'Save Project & Open Floors/Units'}
+          </button>
+        </form>
+
+        {/* Active Project Selector & Opened Units Matrix */}
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-bold uppercase tracking-wider text-amber-400">
+                2. Opened Floors &amp; Units Data Feed
+              </h2>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {activeProject
+                  ? `Project: ${
+                      activeProject.project_name || activeProject.name || `#${activeProject.id}`
+                    } • Builder Units: ${summaryCounts.builderCount} • Landowner Units: ${
+                      summaryCounts.landownerCount
+                    } • Residential: ${summaryCounts.residentialCount} • Commercial: ${
+                      summaryCounts.commercialCount
+                    }`
+                  : 'Add a project above to open floors and units.'}
+              </p>
+            </div>
+
+            {projects.length > 0 && (
+              <select
+                value={activeProject ? String(activeProject.id) : ''}
+                onChange={(e) => setSelectedProjectId(e.target.value)}
+                className="px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-xs font-bold text-amber-300"
+              >
+                {projects.map((p) => (
+                  <option key={String(p.id)} value={String(p.id)}>
+                    {p.project_name || p.name || p.site_name || `Project #${p.id}`}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
+          {activeUnits.length === 0 ? (
+            <div className="py-8 text-center text-xs text-slate-400">
+              No units opened yet. Submit a project above with floor count and units per floor.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-950 text-slate-400 uppercase border-b border-slate-800">
+                    <th className="py-2.5 px-3">Floor</th>
+                    <th className="py-2.5 px-3">Unit</th>
+                    <th className="py-2.5 px-3">Share</th>
+                    <th className="py-2.5 px-3">Type</th>
+                    <th className="py-2.5 px-3 text-right">Area (Sq.Ft)</th>
+                    <th className="py-2.5 px-3 text-right">Total Price (₹)</th>
+                    <th className="py-2.5 px-3">Status</th>
+                    <th className="py-2.5 px-3 text-right">Action</th>
                   </tr>
-                ) : (
-                  ledgerRows.slice(0, 6).map((row) => {
-                    const ref = row.voucher_no || row.reference_no || `#${row.id}`;
-                    const desc =
-                      row.account_name ||
-                      row.ledger_name ||
-                      row.description ||
-                      row.narration ||
-                      "-";
-                    const dr = toNum(row.debit);
-                    const cr = toNum(row.credit);
-                    const fallbackAmt = toNum(row.amount);
-                    const isCr = String(row.entry_type ?? "").toUpperCase() === "CREDIT";
+                </thead>
+                <tbody className="divide-y divide-slate-800">
+                  {activeUnits.map((u) => {
+                    const isEditing = editingUnitCode === u.unitCode;
                     return (
-                      <tr key={String(row.id)} className="hover:bg-slate-50">
-                        <td className="py-2.5 px-3 font-bold text-[#0B1F3A]">{ref}</td>
-                        <td className="py-2.5 px-3 text-slate-700">{desc}</td>
-                        <td className="py-2.5 px-3 text-slate-600">{row.project_name || "-"}</td>
-                        <td className="py-2.5 px-3 text-right font-semibold text-slate-900">
-                          {dr > 0 ? formatINR(dr) : !isCr && fallbackAmt > 0 ? formatINR(fallbackAmt) : "-"}
+                      <tr key={u.unitCode} className="hover:bg-slate-800/40">
+                        <td className="py-2.5 px-3 text-slate-300">{u.floorLabel}</td>
+                        <td className="py-2.5 px-3 font-bold text-white">{u.unitCode}</td>
+                        <td className="py-2.5 px-3">
+                          {isEditing ? (
+                            <select
+                              value={editOwnerShare}
+                              onChange={(e) => setEditOwnerShare(e.target.value as ShareOwner)}
+                              className="px-2 py-1 rounded bg-slate-950 border border-slate-700 text-xs"
+                            >
+                              <option value="BUILDER">BUILDER</option>
+                              <option value="LANDOWNER">LANDOWNER</option>
+                            </select>
+                          ) : (
+                            <span
+                              className={`px-2 py-0.5 rounded font-bold ${
+                                u.ownerShare === 'BUILDER'
+                                  ? 'bg-amber-500/15 text-amber-300'
+                                  : 'bg-sky-500/15 text-sky-300'
+                              }`}
+                            >
+                              {u.ownerShare}
+                            </span>
+                          )}
                         </td>
-                        <td className="py-2.5 px-3 text-right font-semibold text-slate-900">
-                          {cr > 0 ? formatINR(cr) : isCr && fallbackAmt > 0 ? formatINR(fallbackAmt) : "-"}
+                        <td className="py-2.5 px-3">
+                          {isEditing ? (
+                            <select
+                              value={editCategory}
+                              onChange={(e) => setEditCategory(e.target.value as UnitCategory)}
+                              className="px-2 py-1 rounded bg-slate-950 border border-slate-700 text-xs"
+                            >
+                              <option value="RESIDENTIAL">RESIDENTIAL</option>
+                              <option value="COMMERCIAL">COMMERCIAL</option>
+                            </select>
+                          ) : (
+                            <span className="text-slate-200 font-semibold">{u.category}</span>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 text-right">
+                          {isEditing ? (
+                            <input
+                              type="number"
+                              value={editArea}
+                              onChange={(e) => setEditArea(e.target.value)}
+                              className="w-24 px-2 py-1 rounded bg-slate-950 border border-slate-700 text-right text-xs"
+                            />
+                          ) : (
+                            <span className="text-slate-300">{u.areaSqft}</span>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-bold text-emerald-300">
+                          {isEditing ? (
+                            <input
+                              type="number"
+                              value={editRate}
+                              onChange={(e) => setEditRate(e.target.value)}
+                              className="w-24 px-2 py-1 rounded bg-slate-950 border border-slate-700 text-right text-xs"
+                            />
+                          ) : (
+                            `₹${Number(u.totalPrice || 0).toLocaleString('en-IN')}`
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          {isEditing ? (
+                            <select
+                              value={editStatus}
+                              onChange={(e) =>
+                                setEditStatus(e.target.value as 'AVAILABLE' | 'BOOKED')
+                              }
+                              className="px-2 py-1 rounded bg-slate-950 border border-slate-700 text-xs"
+                            >
+                              <option value="AVAILABLE">AVAILABLE</option>
+                              <option value="BOOKED">BOOKED</option>
+                            </select>
+                          ) : (
+                            <span className="text-slate-300">{u.status}</span>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 text-right">
+                          {isEditing ? (
+                            <button
+                              type="button"
+                              onClick={() => handleSaveUnitData(u.unitCode)}
+                              className="px-2.5 py-1 rounded bg-emerald-500 text-slate-950 font-bold text-xs"
+                            >
+                              Save
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => openUnitEditor(u)}
+                              className="px-2.5 py-1 rounded bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-amber-300 font-bold text-xs transition"
+                            >
+                              Edit Data
+                            </button>
+                          )}
                         </td>
                       </tr>
                     );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
     </div>

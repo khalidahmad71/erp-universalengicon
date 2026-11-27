@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from '@/lib/supabase';
 import {
   Home,
   Store,
@@ -17,12 +17,11 @@ import {
   ArrowUpRight,
   PlusCircle,
   CheckCircle2,
+  Building2,
 } from 'lucide-react';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+type ShareOwner = 'BUILDER' | 'LANDOWNER';
+type OwnershipMode = 'JDA_SHARE' | 'SELF_PURCHASE';
 
 interface RealEstateUnit {
   id: string;
@@ -31,6 +30,7 @@ interface RealEstateUnit {
   floor_no: string;
   unit_number: string;
   unit_type: 'Flat' | 'Shop' | 'Office' | string;
+  share_owner?: ShareOwner | string | null;
   area_sqft: number;
   total_price: number;
   status: 'Available' | 'Booked' | 'Hold' | string;
@@ -53,6 +53,40 @@ interface CustomerReceipt {
   receipt_date: string;
 }
 
+interface DraftGeneratedUnit {
+  key: string;
+  floorNo: number;
+  floorLabel: string;
+  unitNumber: string;
+  shareOwner: ShareOwner;
+  unitType: 'Flat' | 'Shop' | 'Office';
+  areaSqft: number;
+  totalPrice: number;
+}
+
+function getOrdinalFloorLabel(floorNum: number): string {
+  const mod100 = floorNum % 100;
+  if (mod100 >= 11 && mod100 <= 13) return `${floorNum}th Floor`;
+  switch (floorNum % 10) {
+    case 1:
+      return `${floorNum}st Floor`;
+    case 2:
+      return `${floorNum}nd Floor`;
+    case 3:
+      return `${floorNum}rd Floor`;
+    default:
+      return `${floorNum}th Floor`;
+  }
+}
+
+function parseFloorNumbers(input: string, maxFloors: number): number[] {
+  const nums = input
+    .split(',')
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isInteger(n) && n >= 1 && n <= maxFloors);
+  return Array.from(new Set(nums)).sort((a, b) => a - b);
+}
+
 function RealEstateSalesContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -64,6 +98,7 @@ function RealEstateSalesContent() {
 
   const [selectedProject, setSelectedProject] = useState<string>('Godrej Zen Estate Phase-2');
   const [typeFilter, setTypeFilter] = useState<string>('ALL');
+  const [shareFilter, setShareFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -74,12 +109,17 @@ function RealEstateSalesContent() {
   const [bookingDate, setBookingDate] = useState(new Date().toISOString().split('T')[0]);
   const [savingBooking, setSavingBooking] = useState(false);
 
-  const [newProject, setNewProject] = useState('Godrej Zen Estate Phase-2');
-  const [newFloor, setNewFloor] = useState('4th Floor');
-  const [newUnitNo, setNewUnitNo] = useState('');
+  // Dynamic Project + Floor/Unit Setup States
+  const [newProject, setNewProject] = useState('');
+  const [ownershipMode, setOwnershipMode] = useState<OwnershipMode>('JDA_SHARE');
+  const [totalFloorsInput, setTotalFloorsInput] = useState('10');
+  const [unitsPerFloorInput, setUnitsPerFloorInput] = useState('4');
+  const [builderFloorsInput, setBuilderFloorsInput] = useState('1, 3, 5, 7, 9');
+  const [landownerFloorsInput, setLandownerFloorsInput] = useState('2, 4, 6, 8, 10');
   const [newUnitType, setNewUnitType] = useState<'Flat' | 'Shop' | 'Office'>('Flat');
-  const [newArea, setNewArea] = useState('1500');
-  const [newPrice, setNewPrice] = useState('9800000');
+  const [newArea, setNewArea] = useState('1200');
+  const [newPrice, setNewPrice] = useState('5500000');
+  const [draftUnits, setDraftUnits] = useState<DraftGeneratedUnit[]>([]);
   const [savingNewUnit, setSavingNewUnit] = useState(false);
 
   const [recUnitNo, setRecUnitNo] = useState('');
@@ -124,7 +164,86 @@ function RealEstateSalesContent() {
 
   useEffect(() => {
     fetchAllData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const handleGenerateFloorsAndUnits = () => {
+    const floors = Math.max(1, Math.min(60, Math.floor(Number(totalFloorsInput) || 1)));
+    const perFloor = Math.max(1, Math.min(30, Math.floor(Number(unitsPerFloorInput) || 1)));
+    const areaNum = Math.max(0, Number(newArea) || 0);
+    const priceNum = Math.max(0, Number(newPrice) || 0);
+
+    const builderSet = new Set<number>(
+      ownershipMode === 'SELF_PURCHASE'
+        ? Array.from({ length: floors }, (_, i) => i + 1)
+        : parseFloorNumbers(builderFloorsInput, floors)
+    );
+
+    const landownerSet = new Set<number>(
+      ownershipMode === 'SELF_PURCHASE'
+        ? []
+        : parseFloorNumbers(landownerFloorsInput, floors)
+    );
+
+    const generated: DraftGeneratedUnit[] = [];
+    for (let f = 1; f <= floors; f++) {
+      const shareOwner: ShareOwner =
+        ownershipMode === 'SELF_PURCHASE'
+          ? 'BUILDER'
+          : landownerSet.has(f) && !builderSet.has(f)
+          ? 'LANDOWNER'
+          : 'BUILDER';
+
+      const floorLabel = getOrdinalFloorLabel(f);
+      for (let u = 1; u <= perFloor; u++) {
+        const unitNumber = `${f}${String(u).padStart(2, '0')}`;
+        generated.push({
+          key: `${f}-${u}`,
+          floorNo: f,
+          floorLabel,
+          unitNumber,
+          shareOwner,
+          unitType: newUnitType,
+          areaSqft: areaNum,
+          totalPrice: priceNum,
+        });
+      }
+    }
+
+    setDraftUnits(generated);
+  };
+
+  useEffect(() => {
+    if (activeView === 'new' && draftUnits.length === 0) {
+      handleGenerateFloorsAndUnits();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeView]);
+
+  const handleOwnershipModeSwitch = (mode: OwnershipMode) => {
+    setOwnershipMode(mode);
+    const floors = Math.max(1, Math.min(60, Math.floor(Number(totalFloorsInput) || 10)));
+    if (mode === 'SELF_PURCHASE') {
+      setBuilderFloorsInput(Array.from({ length: floors }, (_, i) => i + 1).join(', '));
+      setLandownerFloorsInput('');
+    } else {
+      const odd: number[] = [];
+      const even: number[] = [];
+      for (let f = 1; f <= floors; f++) {
+        if (f % 2 === 1) odd.push(f);
+        else even.push(f);
+      }
+      setBuilderFloorsInput(odd.join(', '));
+      setLandownerFloorsInput(even.join(', '));
+    }
+  };
+
+  const updateDraftUnit = (
+    key: string,
+    patch: Partial<Pick<DraftGeneratedUnit, 'shareOwner' | 'unitType' | 'areaSqft' | 'totalPrice' | 'unitNumber'>>
+  ) => {
+    setDraftUnits((prev) => prev.map((item) => (item.key === key ? { ...item, ...patch } : item)));
+  };
 
   const projectsList = useMemo(() => {
     const list = Array.from(new Set(units.map((u) => u.project_name)));
@@ -143,6 +262,9 @@ function RealEstateSalesContent() {
     const total = projectUnits.length;
     const booked = projectUnits.filter((u) => u.status === 'Booked').length;
     const available = projectUnits.filter((u) => u.status === 'Available').length;
+
+    const builderUnits = projectUnits.filter((u) => (u.share_owner || 'BUILDER') === 'BUILDER').length;
+    const landownerUnits = projectUnits.filter((u) => u.share_owner === 'LANDOWNER').length;
 
     const flatsTotal = projectUnits.filter((u) => u.unit_type === 'Flat').length;
     const flatsBooked = projectUnits.filter((u) => u.unit_type === 'Flat' && u.status === 'Booked').length;
@@ -163,6 +285,8 @@ function RealEstateSalesContent() {
       total,
       booked,
       available,
+      builderUnits,
+      landownerUnits,
       flatsTotal,
       flatsBooked,
       shopsTotal,
@@ -177,14 +301,16 @@ function RealEstateSalesContent() {
   const floorGroups = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     const filtered = projectUnits.filter((u) => {
+      const normalizedShare = (u.share_owner || 'BUILDER').toUpperCase();
       const matchType = typeFilter === 'ALL' || u.unit_type === typeFilter;
+      const matchShare = shareFilter === 'ALL' || normalizedShare === shareFilter;
       const matchStatus = statusFilter === 'ALL' || u.status === statusFilter;
       const matchSearch =
         !q ||
         u.unit_number.toLowerCase().includes(q) ||
         (u.customer_name || '').toLowerCase().includes(q) ||
         u.floor_no.toLowerCase().includes(q);
-      return matchType && matchStatus && matchSearch;
+      return matchType && matchShare && matchStatus && matchSearch;
     });
 
     const groups: Record<string, RealEstateUnit[]> = {};
@@ -193,7 +319,7 @@ function RealEstateSalesContent() {
       groups[u.floor_no].push(u);
     });
     return groups;
-  }, [projectUnits, typeFilter, statusFilter, searchQuery]);
+  }, [projectUnits, typeFilter, shareFilter, statusFilter, searchQuery]);
 
   const openUnitModal = (unit: RealEstateUnit) => {
     setActiveUnit(unit);
@@ -254,7 +380,7 @@ function RealEstateSalesContent() {
     if (!activeUnit) return;
     if (!confirm(`Cancel booking for Unit ${activeUnit.unit_number} and mark Vacant?`)) return;
 
-    await supabase
+    const { error } = await supabase
       .from('real_estate_units')
       .update({
         status: 'Available',
@@ -266,35 +392,86 @@ function RealEstateSalesContent() {
       })
       .eq('id', activeUnit.id);
 
+    if (error) {
+      await supabase
+        .from('real_estate_units')
+        .update({
+          status: 'Available',
+          customer_name: null,
+          customer_phone: null,
+          booking_date: null,
+          amount_received: 0,
+        })
+        .eq('id', activeUnit.id);
+    }
+
     setActiveUnit(null);
     await fetchAllData();
   };
 
-  const handleAddNewProjectOrUnit = async (e: React.FormEvent) => {
+  const handleSaveGeneratedBuilding = async (e: React.FormEvent) => {
     e.preventDefault();
+    const cleanProjectName = newProject.trim();
+    if (!cleanProjectName) {
+      alert('Please enter Project Name.');
+      return;
+    }
+    if (draftUnits.length === 0) {
+      alert('Please click "Open Floors & Units" first.');
+      return;
+    }
+
     setSavingNewUnit(true);
 
-    const unitPrice = Number(newPrice || 0);
-    const { error } = await supabase.from('real_estate_units').insert([
-      {
-        project_name: newProject.trim(),
-        floor_no: newFloor.trim(),
-        unit_number: newUnitNo.trim(),
-        unit_type: newUnitType,
-        area_sqft: Number(newArea || 0),
-        total_price: unitPrice,
+    // 1. Register project in projects master if not present
+    try {
+      await supabase.from('projects').insert([
+        {
+          name: cleanProjectName,
+          site_name: cleanProjectName,
+          status: 'ACTIVE',
+        },
+      ]);
+    } catch {}
+
+    // 2. Build full payload with share_owner + balance_amount
+    const fullRows = draftUnits.map((u) => ({
+      project_name: cleanProjectName,
+      floor_no: u.floorLabel,
+      unit_number: u.unitNumber.trim(),
+      unit_type: u.unitType,
+      share_owner: u.shareOwner,
+      area_sqft: Number(u.areaSqft || 0),
+      total_price: Number(u.totalPrice || 0),
+      status: 'Available',
+      amount_received: 0,
+      balance_amount: Number(u.totalPrice || 0),
+    }));
+
+    let { error } = await supabase.from('real_estate_units').insert(fullRows);
+
+    // Fallback if optional columns (balance_amount / share_owner) haven't been added to Supabase yet
+    if (error && (error.message.includes('balance_amount') || error.message.includes('share_owner'))) {
+      const baseRows = draftUnits.map((u) => ({
+        project_name: cleanProjectName,
+        floor_no: u.floorLabel,
+        unit_number: u.unitNumber.trim(),
+        unit_type: u.unitType,
+        area_sqft: Number(u.areaSqft || 0),
+        total_price: Number(u.totalPrice || 0),
         status: 'Available',
         amount_received: 0,
-        balance_amount: unitPrice,
-      },
-    ]);
+      }));
+      const retry = await supabase.from('real_estate_units').insert(baseRows);
+      error = retry.error;
+    }
 
     setSavingNewUnit(false);
     if (error) {
-      alert('Error saving project unit: ' + error.message);
+      alert('Error saving project units: ' + error.message);
     } else {
-      setNewUnitNo('');
-      setSelectedProject(newProject.trim());
+      setSelectedProject(cleanProjectName);
+      setDraftUnits([]);
       await fetchAllData();
       router.push('/sales?view=inventory');
     }
@@ -354,12 +531,21 @@ function RealEstateSalesContent() {
             </span>
             <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight mt-0.5">
               {activeView === 'inventory' && 'Project Available & Booked Inventory'}
-              {activeView === 'new' && 'Record New Project & Property Units'}
+              {activeView === 'new' && 'New Project Setup — Floors, Builder/Landowner Share & Units'}
               {activeView === 'receipts' && 'Customer Payment Receipts & Register'}
             </h1>
           </div>
 
-          <div className="flex items-center gap-3 w-full md:w-auto">
+          <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+            {activeView !== 'new' && (
+              <button
+                type="button"
+                onClick={() => router.push('/sales?view=new')}
+                className="px-4 py-2.5 bg-blue-800 hover:bg-blue-900 text-white text-xs font-bold rounded-xl cursor-pointer"
+              >
+                + New Project / Floors
+              </button>
+            )}
             <label className="text-xs font-bold text-slate-500 uppercase hidden sm:block">
               Active Project:
             </label>
@@ -394,11 +580,25 @@ function RealEstateSalesContent() {
 
               <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs">
                 <div className="flex items-center justify-between text-xs font-semibold text-slate-500">
-                  <span>Flats</span>
+                  <span>JDA / Share Split</span>
+                  <Building2 className="w-4 h-4 text-amber-600" />
+                </div>
+                <div className="text-lg font-extrabold text-slate-900 mt-2">
+                  Builder: {stats.builderUnits}
+                </div>
+                <div className="mt-2.5 text-xs font-semibold text-sky-700">
+                  Landowner: {stats.landownerUnits} Units
+                </div>
+              </div>
+
+              <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs">
+                <div className="flex items-center justify-between text-xs font-semibold text-slate-500">
+                  <span>Flats (Residential)</span>
                   <Home className="w-4 h-4 text-blue-600" />
                 </div>
                 <div className="text-2xl font-extrabold text-slate-900 mt-2">
-                  {stats.flatsBooked} <span className="text-sm font-medium text-slate-400">/ {stats.flatsTotal}</span>
+                  {stats.flatsBooked}{' '}
+                  <span className="text-sm font-medium text-slate-400">/ {stats.flatsTotal}</span>
                 </div>
                 <div className="mt-3 text-xs text-slate-500">
                   {stats.flatsTotal - stats.flatsBooked} Available
@@ -407,27 +607,17 @@ function RealEstateSalesContent() {
 
               <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs">
                 <div className="flex items-center justify-between text-xs font-semibold text-slate-500">
-                  <span>Shops</span>
+                  <span>Commercial (Shop/Office)</span>
                   <Store className="w-4 h-4 text-amber-600" />
                 </div>
                 <div className="text-2xl font-extrabold text-slate-900 mt-2">
-                  {stats.shopsBooked} <span className="text-sm font-medium text-slate-400">/ {stats.shopsTotal}</span>
+                  {stats.shopsBooked + stats.officesBooked}{' '}
+                  <span className="text-sm font-medium text-slate-400">
+                    / {stats.shopsTotal + stats.officesTotal}
+                  </span>
                 </div>
                 <div className="mt-3 text-xs text-slate-500">
-                  {stats.shopsTotal - stats.shopsBooked} Available
-                </div>
-              </div>
-
-              <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs">
-                <div className="flex items-center justify-between text-xs font-semibold text-slate-500">
-                  <span>Offices</span>
-                  <Briefcase className="w-4 h-4 text-indigo-600" />
-                </div>
-                <div className="text-2xl font-extrabold text-slate-900 mt-2">
-                  {stats.officesBooked} <span className="text-sm font-medium text-slate-400">/ {stats.officesTotal}</span>
-                </div>
-                <div className="mt-3 text-xs text-slate-500">
-                  {stats.officesTotal - stats.officesBooked} Available
+                  Shops: {stats.shopsTotal} • Offices: {stats.officesTotal}
                 </div>
               </div>
 
@@ -459,14 +649,24 @@ function RealEstateSalesContent() {
 
               <div className="flex flex-wrap items-center gap-2">
                 <select
+                  value={shareFilter}
+                  onChange={(e) => setShareFilter(e.target.value)}
+                  className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700"
+                >
+                  <option value="ALL">All Shares (Builder &amp; Landowner)</option>
+                  <option value="BUILDER">Builder Share Only</option>
+                  <option value="LANDOWNER">Landowner Share Only</option>
+                </select>
+
+                <select
                   value={typeFilter}
                   onChange={(e) => setTypeFilter(e.target.value)}
                   className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700"
                 >
                   <option value="ALL">All Types (Flat/Shop/Office)</option>
-                  <option value="Flat">Flats Only</option>
-                  <option value="Shop">Shops Only</option>
-                  <option value="Office">Offices Only</option>
+                  <option value="Flat">Flats (Residential)</option>
+                  <option value="Shop">Shops (Commercial)</option>
+                  <option value="Office">Offices (Commercial)</option>
                 </select>
 
                 <select
@@ -492,7 +692,7 @@ function RealEstateSalesContent() {
                   onClick={() => router.push('/sales?view=new')}
                   className="px-4 py-2 bg-blue-800 text-white text-xs font-bold rounded-lg cursor-pointer"
                 >
-                  + Record New Project / Unit
+                  + Record New Project / Open Floors
                 </button>
               </div>
             ) : (
@@ -500,6 +700,7 @@ function RealEstateSalesContent() {
                 {Object.entries(floorGroups).map(([floorName, items]) => {
                   const floorBooked = items.filter((i) => i.status === 'Booked').length;
                   const floorKhali = items.filter((i) => i.status === 'Available').length;
+                  const floorOwner = (items[0]?.share_owner || 'BUILDER').toUpperCase();
 
                   return (
                     <div
@@ -512,7 +713,18 @@ function RealEstateSalesContent() {
                             {floorName.slice(0, 2).toUpperCase()}
                           </div>
                           <div>
-                            <h2 className="text-sm font-extrabold text-slate-900">{floorName}</h2>
+                            <div className="flex items-center gap-2">
+                              <h2 className="text-sm font-extrabold text-slate-900">{floorName}</h2>
+                              <span
+                                className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded ${
+                                  floorOwner === 'LANDOWNER'
+                                    ? 'bg-sky-100 text-sky-800 border border-sky-200'
+                                    : 'bg-amber-100 text-amber-900 border border-amber-200'
+                                }`}
+                              >
+                                {floorOwner} SHARE
+                              </span>
+                            </div>
                             <p className="text-[11px] text-slate-500">{items.length} Units</p>
                           </div>
                         </div>
@@ -532,7 +744,9 @@ function RealEstateSalesContent() {
                           const isBooked = unit.status === 'Booked';
                           const totalVal = Number(unit.total_price || 0);
                           const paidVal = Number(unit.amount_received || 0);
-                          const paidPct = totalVal > 0 ? Math.min(100, Math.round((paidVal / totalVal) * 100)) : 0;
+                          const paidPct =
+                            totalVal > 0 ? Math.min(100, Math.round((paidVal / totalVal) * 100)) : 0;
+                          const unitShare = (unit.share_owner || 'BUILDER').toUpperCase();
 
                           return (
                             <div
@@ -557,15 +771,26 @@ function RealEstateSalesContent() {
                                     </h3>
                                   </div>
 
-                                  <span
-                                    className={`text-[10px] font-bold uppercase px-2.5 py-1 rounded-md ${
-                                      isBooked
-                                        ? 'bg-slate-100 text-slate-800 border border-slate-200'
-                                        : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                    }`}
-                                  >
-                                    {isBooked ? 'Booked' : 'Available'}
-                                  </span>
+                                  <div className="flex flex-col items-end gap-1">
+                                    <span
+                                      className={`text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-md ${
+                                        isBooked
+                                          ? 'bg-slate-100 text-slate-800 border border-slate-200'
+                                          : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                      }`}
+                                    >
+                                      {isBooked ? 'Booked' : 'Available'}
+                                    </span>
+                                    <span
+                                      className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded ${
+                                        unitShare === 'LANDOWNER'
+                                          ? 'bg-sky-50 text-sky-700 border border-sky-200'
+                                          : 'bg-amber-50 text-amber-800 border border-amber-200'
+                                      }`}
+                                    >
+                                      {unitShare}
+                                    </span>
+                                  </div>
                                 </div>
 
                                 <div className="mt-2 text-sm font-bold text-slate-800">
@@ -622,106 +847,257 @@ function RealEstateSalesContent() {
         )}
 
         {activeView === 'new' && (
-          <div className="max-w-2xl mx-auto bg-white border border-slate-200 rounded-2xl p-6 lg:p-8 shadow-xs space-y-6">
+          <div className="max-w-5xl mx-auto bg-white border border-slate-200 rounded-2xl p-6 lg:p-8 shadow-xs space-y-6">
             <div className="border-b border-slate-100 pb-4 flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center">
                 <PlusCircle className="w-5 h-5" />
               </div>
               <div>
                 <h2 className="text-lg font-extrabold text-slate-900">
-                  Add New Project or Property Unit
+                  Add New Project &amp; Open Floors / Units (JDA or Self Purchase)
                 </h2>
                 <p className="text-xs text-slate-500">
-                  Create a new project name or add Flats, Shops, and Offices to an existing floor.
+                  Building ke floors (5, 10, 15+), Builder vs Landowner share floors, aur Residential/Commercial units open karke data feed karein.
                 </p>
               </div>
             </div>
 
-            <form onSubmit={handleAddNewProjectOrUnit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  Project Name (Enter new project name or keep existing) *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Godrej Zen Estate Phase-2"
-                  value={newProject}
-                  onChange={(e) => setNewProject(e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl text-sm font-bold text-slate-900 focus:bg-white focus:border-blue-700 focus:outline-none"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    Floor Name / Number *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Ground Floor, 1st Floor, 5th Floor"
-                    value={newFloor}
-                    onChange={(e) => setNewFloor(e.target.value)}
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-900 focus:bg-white focus:border-blue-700 focus:outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    Unit Number *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. 501, G-04, OFF-102"
-                    value={newUnitNo}
-                    onChange={(e) => setNewUnitNo(e.target.value)}
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-900 focus:bg-white focus:border-blue-700 focus:outline-none"
-                  />
-                </div>
-              </div>
-
+            <form onSubmit={handleSaveGeneratedBuilding} className="space-y-5">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    Project / Building Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Sahar Apartment / Godrej Zen Estate Phase-2"
+                    value={newProject}
+                    onChange={(e) => setNewProject(e.target.value)}
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl text-sm font-bold text-slate-900 focus:bg-white focus:border-blue-700 focus:outline-none"
+                  />
+                </div>
+
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    Property Type *
+                    Land / Development Model *
+                  </label>
+                  <select
+                    value={ownershipMode}
+                    onChange={(e) => handleOwnershipModeSwitch(e.target.value as OwnershipMode)}
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl text-sm font-bold text-slate-900 focus:bg-white focus:border-blue-700 focus:outline-none"
+                  >
+                    <option value="JDA_SHARE">JDA (Builder + Landowner Share)</option>
+                    <option value="SELF_PURCHASE">Self Purchase (100% Builder)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    Total Floors (5 / 10 / 15+) *
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="60"
+                    required
+                    value={totalFloorsInput}
+                    onChange={(e) => setTotalFloorsInput(e.target.value)}
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl text-sm font-bold text-slate-900"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    Units Per Floor *
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="30"
+                    required
+                    value={unitsPerFloorInput}
+                    onChange={(e) => setUnitsPerFloorInput(e.target.value)}
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl text-sm font-bold text-slate-900"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    Builder Share Floors
+                  </label>
+                  <input
+                    type="text"
+                    disabled={ownershipMode === 'SELF_PURCHASE'}
+                    placeholder="e.g. 1, 3, 5, 7, 9"
+                    value={builderFloorsInput}
+                    onChange={(e) => setBuilderFloorsInput(e.target.value)}
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-900 disabled:opacity-60"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    Landowner Share Floors
+                  </label>
+                  <input
+                    type="text"
+                    disabled={ownershipMode === 'SELF_PURCHASE'}
+                    placeholder="e.g. 2, 4, 6, 8, 10"
+                    value={landownerFloorsInput}
+                    onChange={(e) => setLandownerFloorsInput(e.target.value)}
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-900 disabled:opacity-60"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 items-end">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    Default Property Type
                   </label>
                   <select
                     value={newUnitType}
                     onChange={(e) => setNewUnitType(e.target.value as 'Flat' | 'Shop' | 'Office')}
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-900 focus:bg-white focus:border-blue-700 focus:outline-none"
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-900"
                   >
                     <option value="Flat">Flat (Residential)</option>
                     <option value="Shop">Shop (Commercial)</option>
-                    <option value="Office">Office (Corporate)</option>
+                    <option value="Office">Office (Commercial)</option>
                   </select>
                 </div>
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    Super Built-up Area (Sq.Ft)
+                    Default Area (Sq.Ft)
                   </label>
                   <input
                     type="number"
                     value={newArea}
                     onChange={(e) => setNewArea(e.target.value)}
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-900 focus:bg-white focus:border-blue-700 focus:outline-none"
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-900"
                   />
                 </div>
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    Total Unit Price (₹)
+                    Default Unit Price (₹)
                   </label>
                   <input
                     type="number"
                     value={newPrice}
                     onChange={(e) => setNewPrice(e.target.value)}
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-900 focus:bg-white focus:border-blue-700 focus:outline-none"
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-900"
                   />
                 </div>
+
+                <div>
+                  <button
+                    type="button"
+                    onClick={handleGenerateFloorsAndUnits}
+                    className="w-full px-4 py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow cursor-pointer"
+                  >
+                    Open Floors &amp; Units ({Number(totalFloorsInput || 0) * Number(unitsPerFloorInput || 0)})
+                  </button>
+                </div>
               </div>
+
+              {draftUnits.length > 0 && (
+                <div className="border border-slate-200 rounded-2xl overflow-hidden">
+                  <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-extrabold text-slate-900">
+                      Opened Units Matrix ({draftUnits.length} Units) — Feed / Edit Per Unit Before Saving
+                    </span>
+                    <span className="text-[11px] font-bold text-slate-600">
+                      Builder: {draftUnits.filter((d) => d.shareOwner === 'BUILDER').length} • Landowner:{' '}
+                      {draftUnits.filter((d) => d.shareOwner === 'LANDOWNER').length}
+                    </span>
+                  </div>
+
+                  <div className="max-h-96 overflow-y-auto overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead className="sticky top-0 bg-slate-100 text-slate-600 uppercase border-b border-slate-200">
+                        <tr>
+                          <th className="py-2.5 px-3">Floor</th>
+                          <th className="py-2.5 px-3">Unit No</th>
+                          <th className="py-2.5 px-3">Share Owner</th>
+                          <th className="py-2.5 px-3">Type (Res/Comm)</th>
+                          <th className="py-2.5 px-3">Area (Sq.Ft)</th>
+                          <th className="py-2.5 px-3">Price (₹)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {draftUnits.map((u) => (
+                          <tr key={u.key} className="hover:bg-slate-50">
+                            <td className="py-2 px-3 font-semibold text-slate-700">{u.floorLabel}</td>
+                            <td className="py-2 px-3">
+                              <input
+                                type="text"
+                                value={u.unitNumber}
+                                onChange={(e) => updateDraftUnit(u.key, { unitNumber: e.target.value })}
+                                className="w-24 px-2 py-1 border border-slate-300 rounded font-bold text-slate-900"
+                              />
+                            </td>
+                            <td className="py-2 px-3">
+                              <select
+                                value={u.shareOwner}
+                                onChange={(e) =>
+                                  updateDraftUnit(u.key, { shareOwner: e.target.value as ShareOwner })
+                                }
+                                className={`px-2 py-1 border rounded font-bold ${
+                                  u.shareOwner === 'LANDOWNER'
+                                    ? 'bg-sky-50 border-sky-300 text-sky-800'
+                                    : 'bg-amber-50 border-amber-300 text-amber-900'
+                                }`}
+                              >
+                                <option value="BUILDER">BUILDER</option>
+                                <option value="LANDOWNER">LANDOWNER</option>
+                              </select>
+                            </td>
+                            <td className="py-2 px-3">
+                              <select
+                                value={u.unitType}
+                                onChange={(e) =>
+                                  updateDraftUnit(u.key, {
+                                    unitType: e.target.value as 'Flat' | 'Shop' | 'Office',
+                                  })
+                                }
+                                className="px-2 py-1 border border-slate-300 rounded font-semibold text-slate-800"
+                              >
+                                <option value="Flat">Flat (Residential)</option>
+                                <option value="Shop">Shop (Commercial)</option>
+                                <option value="Office">Office (Commercial)</option>
+                              </select>
+                            </td>
+                            <td className="py-2 px-3">
+                              <input
+                                type="number"
+                                value={u.areaSqft}
+                                onChange={(e) =>
+                                  updateDraftUnit(u.key, { areaSqft: Number(e.target.value || 0) })
+                                }
+                                className="w-24 px-2 py-1 border border-slate-300 rounded text-slate-800"
+                              />
+                            </td>
+                            <td className="py-2 px-3">
+                              <input
+                                type="number"
+                                value={u.totalPrice}
+                                onChange={(e) =>
+                                  updateDraftUnit(u.key, { totalPrice: Number(e.target.value || 0) })
+                                }
+                                className="w-32 px-2 py-1 border border-slate-300 rounded font-bold text-slate-900"
+                              />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
 
               <div className="pt-3 flex items-center justify-end gap-3">
                 <button
@@ -737,7 +1113,9 @@ function RealEstateSalesContent() {
                   className="inline-flex items-center gap-2 px-6 py-3 bg-blue-800 hover:bg-blue-900 text-white font-bold text-xs rounded-xl shadow cursor-pointer"
                 >
                   <CheckCircle2 className="w-4 h-4" />
-                  {savingNewUnit ? 'Saving...' : 'Save & View in Inventory'}
+                  {savingNewUnit
+                    ? 'Saving Building & Units...'
+                    : `Save All ${draftUnits.length} Units & Open Inventory`}
                 </button>
               </div>
             </form>
@@ -775,7 +1153,7 @@ function RealEstateSalesContent() {
                   >
                     {projectUnits.map((u) => (
                       <option key={u.id} value={u.unit_number}>
-                        {u.unit_number} ({u.unit_type})
+                        {u.unit_number} ({u.unit_type} • {(u.share_owner || 'BUILDER')})
                       </option>
                     ))}
                   </select>
@@ -909,7 +1287,7 @@ function RealEstateSalesContent() {
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
                 <span className="text-[11px] font-bold text-blue-700 uppercase tracking-wider">
-                  {activeUnit.project_name} • {activeUnit.floor_no}
+                  {activeUnit.project_name} • {activeUnit.floor_no} • {(activeUnit.share_owner || 'BUILDER')} SHARE
                 </span>
                 <h3 className="text-lg font-extrabold text-slate-900">
                   Unit {activeUnit.unit_number} ({activeUnit.unit_type})
